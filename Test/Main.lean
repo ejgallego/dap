@@ -99,6 +99,41 @@ def testWidgetProps : IO Unit := do
     assertEq "widget states length" props.states.size (program.size + 1)
     assertEq "widget last pc" ((props.states[props.states.size - 1]?.map (·.pc)).getD 0) program.size
 
+def testDebugSessionContinueAndBreakpoints : IO Unit := do
+  let program : Program :=
+    #[
+      Stmt.letConst "x" 1,
+      Stmt.letConst "y" 2,
+      Stmt.letBin "z" .add "x" "y",
+      Stmt.letBin "w" .mul "z" "y"
+    ]
+  match DebugSession.fromProgram program with
+  | .error err =>
+    throw <| IO.userError s!"testDebugSessionContinueAndBreakpoints failed to launch: {err}"
+  | .ok session =>
+    let session := session.setBreakpoints #[3]
+    let (stopped, reason) := session.initialStop (stopOnEntry := false)
+    assertEq "continue initial reason" reason .breakpoint
+    assertEq "continue stopped line" stopped.currentLine 3
+    let (done, doneReason) := stopped.continueExecution
+    assertEq "continue end reason" doneReason .terminated
+    assertEq "continue end cursor" done.cursor done.maxCursor
+
+def testDebugSessionStepBack : IO Unit := do
+  let program : Program :=
+    #[
+      Stmt.letConst "a" 4,
+      Stmt.letConst "b" 5
+    ]
+  match DebugSession.fromProgram program with
+  | .error err =>
+    throw <| IO.userError s!"testDebugSessionStepBack failed to launch: {err}"
+  | .ok session =>
+    let (forwarded, _) := session.next
+    let (backward, reason) := forwarded.stepBack
+    assertEq "stepBack reason" reason .step
+    assertEq "stepBack cursor" backward.cursor 0
+
 end Dap.Tests
 
 def main : IO Unit := do
@@ -107,4 +142,6 @@ def main : IO Unit := do
   Dap.Tests.testTraceShape
   Dap.Tests.testExplorerNavigation
   Dap.Tests.testWidgetProps
+  Dap.Tests.testDebugSessionContinueAndBreakpoints
+  Dap.Tests.testDebugSessionStepBack
   IO.println "All tests passed."

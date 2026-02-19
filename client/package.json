@@ -1,0 +1,90 @@
+{
+  "name": "lean-toy-dap-client",
+  "displayName": "Lean Toy DAP Client",
+  "description": "Side-loadable VS Code extension that bridges VS Code DAP to Lean RPC methods in this repository.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.88.0"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "activationEvents": [
+    "onDebug",
+    "onCommand:leanToyDap.startDebugging"
+  ],
+  "main": "./out/extension.js",
+  "extensionDependencies": [
+    "leanprover.lean4"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "leanToyDap.startDebugging",
+        "title": "Lean Toy DAP: Start Debugging"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "lean-toy-dap",
+        "label": "Lean Toy DAP",
+        "languages": [
+          "lean"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "request",
+              "type",
+              "name"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "description": "Absolute path to the Lean source file used for RPC position context."
+              },
+              "program": {
+                "type": "array",
+                "description": "Toy program encoded as JSON statements (see README)."
+              },
+              "programFile": {
+                "type": "string",
+                "description": "Path to a JSON file containing the toy program."
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "default": true
+              }
+            }
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "Lean Toy DAP",
+            "description": "Debug the toy arithmetic language through Lean RPC",
+            "body": {
+              "name": "Lean Toy DAP",
+              "type": "lean-toy-dap",
+              "request": "launch",
+              "source": "${file}",
+              "programFile": "${workspaceFolder}/program.json",
+              "stopOnEntry": true
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/vscode": "^1.88.0",
+    "typescript": "^5.4.2"
+  }
+}

@@ -1,3 +1,7 @@
+import Lean
+
+open Lean
+
 namespace Dap
 
 /-- Variable names in the toy language. -/
@@ -9,7 +13,7 @@ inductive BinOp where
   | sub
   | mul
   | div
-  deriving Repr, BEq, DecidableEq, Inhabited
+  deriving Repr, BEq, DecidableEq, Inhabited, FromJson, ToJson
 
 instance : ToString BinOp where
   toString
@@ -22,7 +26,7 @@ instance : ToString BinOp where
 inductive Rhs where
   | const (value : Int)
   | bin (op : BinOp) (lhs rhs : Var)
-  deriving Repr, BEq, DecidableEq, Inhabited
+  deriving Repr, BEq, DecidableEq, Inhabited, FromJson, ToJson
 
 instance : ToString Rhs where
   toString
@@ -36,7 +40,7 @@ A program statement in let-normal form:
 structure Stmt where
   dest : Var
   rhs : Rhs
-  deriving Repr, BEq, DecidableEq, Inhabited
+  deriving Repr, BEq, DecidableEq, Inhabited, FromJson, ToJson
 
 namespace Stmt
 
