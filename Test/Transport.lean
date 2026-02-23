@@ -1,0 +1,139 @@
+/-
+Copyright (c) 2025 Lean FRO LLC. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Author: Emilio J. Gallego Arias
+-/
+
+import Test.Util
+
+open Dap
+open Lean
+
+namespace Dap.Tests
+
+private def encodeDapRequest (seq : Nat) (command : String) (arguments : Json := Json.mkObj []) : String :=
+  let payload := Json.mkObj
+    [ ("seq", toJson seq),
+      ("type", toJson "request"),
+      ("command", toJson command),
+      ("arguments", arguments) ]
+  let data := Lean.Json.compress payload
+  s!"Content-Length: {String.utf8ByteSize data}\r\n\r\n{data}"
+
+private def runToyDapPayload (name : String) (stdinPayload : String) : IO String := do
+  let inputPath := s!".dap/{name}.stdin"
+  IO.FS.createDirAll ".dap"
+  IO.FS.writeFile inputPath stdinPayload
+  let out ← IO.Process.output
+    { cmd := "bash"
+      args := #["-lc", s!".lake/build/bin/toydap < {inputPath}"] }
+  try
+    IO.FS.removeFile inputPath
+  catch _ =>
+    pure ()
+  assertEq s!"toydap ({name}) exits cleanly" out.exitCode 0
+  pure out.stdout
+
+private def appearsBefore (s first second : String) : Bool :=
+  match s.splitOn first with
+  | [] =>
+    false
+  | _ :: tail =>
+    let afterFirst := String.intercalate first tail
+    afterFirst.contains second
+
+def testToyDapProtocolSanity : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "launch" <| Json.mkObj
+          [ ("entryPoint", toJson "mainProgram"),
+            ("stopOnEntry", toJson true) ],
+        encodeDapRequest 3 "threads",
+        encodeDapRequest 4 "next",
+        encodeDapRequest 5 "disconnect" ]
+  let stdout ← runToyDapPayload "toydap.sanity" stdinPayload
+  assertTrue "initialize response present"
+    (stdout.contains "\"request_seq\":1" && stdout.contains "\"command\":\"initialize\"")
+  assertTrue "initialized event present"
+    (stdout.contains "\"event\":\"initialized\"")
+  assertTrue "launch response present"
+    (stdout.contains "\"request_seq\":2" && stdout.contains "\"command\":\"launch\"")
+  assertTrue "threads response present"
+    (stdout.contains "\"request_seq\":3" && stdout.contains "\"command\":\"threads\"")
+  assertTrue "next response present"
+    (stdout.contains "\"request_seq\":4" && stdout.contains "\"command\":\"next\"")
+  assertTrue "disconnect response present"
+    (stdout.contains "\"request_seq\":5" && stdout.contains "\"command\":\"disconnect\"")
+
+def testToyDapBreakpointProtocol : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "setBreakpoints" <| Json.mkObj
+          [ ("breakpoints", Json.arr #[Json.mkObj [("line", toJson (3 : Nat))]]) ],
+        encodeDapRequest 3 "launch" <| Json.mkObj
+          [ ("entryPoint", toJson "mainProgram"),
+            ("stopOnEntry", toJson false) ],
+        encodeDapRequest 4 "disconnect" ]
+  let stdout ← runToyDapPayload "toydap.breakpoint" stdinPayload
+  assertTrue "setBreakpoints response present"
+    (stdout.contains "\"request_seq\":2" && stdout.contains "\"command\":\"setBreakpoints\"")
+  assertTrue "pre-launch breakpoint stays pending"
+    (stdout.contains "\"verified\":false")
+  assertTrue "launch response present in breakpoint flow"
+    (stdout.contains "\"request_seq\":3" && stdout.contains "\"command\":\"launch\"")
+  if stdout.contains "\"event\":\"stopped\"" && stdout.contains "\"reason\":\"breakpoint\"" then
+    pure ()
+  else
+    throw <| IO.userError s!"breakpoint stop reason missing in output: {stdout}"
+
+def testToyDapContinueEventOrder : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "launch" <| Json.mkObj
+          [ ("entryPoint", toJson "mainProgram"),
+            ("stopOnEntry", toJson true) ],
+        encodeDapRequest 3 "continue",
+        encodeDapRequest 4 "disconnect" ]
+  let stdout ← runToyDapPayload "toydap.continue" stdinPayload
+  let continuedMarker := "\"event\":\"continued\""
+  let continueRespMarker := "\"request_seq\":3"
+  assertTrue "continued event is emitted" (stdout.contains continuedMarker)
+  assertTrue "continue response is emitted" (stdout.contains continueRespMarker)
+  let hasStopOrTerm :=
+    stdout.contains "\"event\":\"stopped\"" || stdout.contains "\"event\":\"terminated\""
+  assertTrue "post-continue stop/terminate event is emitted" hasStopOrTerm
+  assertTrue "continued precedes continue response"
+    (appearsBefore stdout continuedMarker continueRespMarker)
+  assertTrue "stop/terminate follows continue response"
+    (appearsBefore stdout continueRespMarker "\"event\":\"stopped\"" ||
+      appearsBefore stdout continueRespMarker "\"event\":\"terminated\"")
+
+def testToyDapLaunchTerminatesOrder : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "launch" <| Json.mkObj
+          [ ("entryPoint", toJson "mainProgram"),
+            ("stopOnEntry", toJson false) ],
+        encodeDapRequest 3 "disconnect" ]
+  let stdout ← runToyDapPayload "toydap.launch.terminates" stdinPayload
+  assertTrue "initialized event emitted before launch response"
+    (appearsBefore stdout "\"event\":\"initialized\"" "\"request_seq\":2")
+  assertTrue "launch response emitted"
+    (stdout.contains "\"request_seq\":2" && stdout.contains "\"command\":\"launch\"")
+  assertTrue "terminated event emitted after launch response"
+    (appearsBefore stdout "\"request_seq\":2" "\"event\":\"terminated\"")
+  assertEq "no stopped event when launch runs to completion"
+    (stdout.contains "\"event\":\"stopped\"")
+    false
+
+def runTransportTests : IO Unit := do
+  testToyDapProtocolSanity
+  testToyDapBreakpointProtocol
+  testToyDapContinueEventOrder
+  testToyDapLaunchTerminatesOrder
+
+end Dap.Tests

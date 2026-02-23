@@ -16,14 +16,16 @@ Lean 4 toy project for:
 - `Dap/Lang/History.lean`: shared cursor/history navigation helpers.
 - `Dap/Lang/Trace.lean`: execution trace and navigation API (`Explorer`).
 - `examples/Main.lean`: sample program and precomputed widget props.
-- `Dap/DAP/Session.lean`: pure debugger session model (breakpoints, continue, next, stepBack).
-- `Dap/DAP/Core.lean`: session store + DAP-shaped pure core operations.
+- `Dap/Debugger/Session.lean`: pure debugger session model (breakpoints, continue, next, stepBack).
+- `Dap/Debugger/Core.lean`: session store + DAP-shaped pure core operations.
 - `Dap/DAP/Server.lean`: Lean server RPC endpoints implementing DAP-like operations.
 - `Dap/DAP/Stdio.lean`: standalone DAP adapter implementation (native DAP protocol over stdio).
 - `Dap/Widget/Types.lean`: pure widget data model + trace-to-widget projection helpers.
 - `Dap/Widget/Server.lean`: widget props + `traceExplorerWidget`.
 - `Dap/DAP/Export.lean`: `dap-export` declaration loader/export logic.
-- `Test/Main.lean`: executable tests.
+- `Test/Core.lean`: core/runtime/debugger tests.
+- `Test/Transport.lean`: DAP stdio transport lifecycle/framing tests.
+- `Test/Main.lean`: test runner executable.
 - `client/`: VS Code extension scaffold for side-loading (`lean-toy-dap` debug type).
 - `DAP_PLAN.md`: roadmap to expose this runtime over DAP.
 
@@ -71,7 +73,7 @@ Keywords/operators (`let`, `add`, `sub`, `mul`, `div`) and literals/idents are t
 
 The debugger now follows a stepper-first design:
 - the interpreter exposes single-step execution (`step`) as the semantic foundation,
-- the debug engine drives execution step-by-step and keeps history for reverse stepping (`stepBack`).
+- the debug engine (`Dap/Debugger/Session.lean`) drives execution step-by-step and keeps history for reverse stepping (`stepBack`).
 
 This keeps interpreter semantics explicit and is easier to teach as the base language grows.
 
@@ -102,6 +104,10 @@ They are designed to be called over Lean's `$/lean/rpc/call` transport.
 - open a Lean file,
 - define `mainProgram : Dap.Program` (or `Dap.ProgramInfo`),
 - launch `lean-toy-dap` with `source = ${file}` and `entryPoint = "mainProgramInfo"` (default).
+
+`dapLaunch` accepts either:
+- `programInfo` (preferred; preserves source spans), or
+- `program` (compatibility mode with empty spans).
 
 `entryPoint` resolves declarations dynamically (unqualified names also try `Main.<name>` and `Dap.Lang.Examples.<name>`). The declaration may be either `Dap.Program` or `Dap.ProgramInfo`.
 

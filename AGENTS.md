@@ -7,7 +7,7 @@ Assume small programs; optimize for simple, explicit, maintainable implementatio
 Do not add compatibility layers/shims during reorganizations; prefer a direct clean structure.
 Primary surfaces:
 - Lean language runtime (`Dap/Lang/*.lean`)
-- Shared pure debugger API/core (`Dap/DAP/Core.lean`)
+- Shared pure debugger API/core (`Dap/Debugger/Core.lean`)
 - Lean RPC debug service (`Dap/DAP/Server.lean`)
 - Standalone DAP adapter (`Dap/DAP/Stdio.lean`, `ToyDap.lean`)
 - VS Code client extension (`client/`)
@@ -23,14 +23,14 @@ Primary surfaces:
 Run these after meaningful changes touching Lean or VS Code codepaths.
 
 ## Architecture guardrails
-- Keep execution semantics in `Dap/Lang/Eval.lean` and `Dap/DAP/Session.lean`.
-- Keep debugger/session semantics in `Dap/DAP/Core.lean` (single source of truth).
+- Keep execution semantics in `Dap/Lang/Eval.lean` and `Dap/Debugger/Session.lean`.
+- Keep debugger/session semantics in `Dap/Debugger/Core.lean` (single source of truth).
 - Treat `ProgramInfo` as the canonical program representation across debugger flows.
 - Keep `Program` support as compatibility/input convenience (`Program -> ProgramInfo` with empty spans).
 - Treat transports as adapters only:
   - Lean RPC adapter logic in `Dap/DAP/Server.lean`
   - StdIO DAP adapter logic in `Dap/DAP/Stdio.lean`
-- Implement new debugger behavior in `Dap/DAP/Core.lean` first, then wire transports.
+- Implement new debugger behavior in `Dap/Debugger/Core.lean` first, then wire transports.
 - Avoid duplicating protocol/state logic across adapters.
 - Keep source mapping consistent (statement index <-> source lines) and clearly document line-base assumptions.
 
@@ -45,12 +45,12 @@ Run these after meaningful changes touching Lean or VS Code codepaths.
 - Use `dap%[...]` as the single DSL elaborator; it should produce `ProgramInfo`.
 
 ## Testing split
-- Core functional tests should target `Dap/DAP/Core.lean` APIs directly.
+- Core functional tests should target `Dap/Debugger/Core.lean` APIs directly.
 - Transport tests should focus on framing/serialization and request-to-core wiring.
 - For DAP protocol sanity tests, cover lifecycle ordering and at least one breakpoint hit path.
 
 ## Review checklist
-- Any behavior duplicated between `Dap/DAP/Server.lean` and `Dap/DAP/Stdio.lean` that belongs in `Dap/DAP/Core.lean`?
+- Any behavior duplicated between `Dap/DAP/Server.lean` and `Dap/DAP/Stdio.lean` that belongs in `Dap/Debugger/Core.lean`?
 - Any hardcoded declaration/entrypoint list that should be generalized?
 - Any duplicate decode/source-mapping logic that can drift from syntax/data definitions?
 - Are breakpoints/stack lines correctly mapped for both plain `Program` and `ProgramInfo`?

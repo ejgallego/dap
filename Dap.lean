@@ -9,8 +9,9 @@ import Dap.Lang.Dsl
 import Dap.Lang.Eval
 import Dap.Lang.History
 import Dap.Lang.Trace
-import Dap.DAP.Session
-import Dap.DAP.Core
+import Dap.Debugger.Session
+import Dap.Debugger.Core
+import Dap.DAP.Resolve
 import Dap.DAP.Export
 import Dap.DAP.Server
 import Dap.Widget.Types

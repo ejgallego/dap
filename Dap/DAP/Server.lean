@@ -5,7 +5,8 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
-import Dap.DAP.Core
+import Dap.Debugger.Core
+import Dap.DAP.Resolve
 
 open Lean Lean.Server
 
@@ -24,7 +25,8 @@ structure InitializeResponse where
   deriving Inhabited, Repr, FromJson, ToJson
 
 structure LaunchParams where
-  program : Program
+  programInfo? : Option ProgramInfo := none
+  program? : Option Program := none
   stopOnEntry : Bool := true
   breakpoints : Array Nat := #[]
   deriving Inhabited, Repr, FromJson, ToJson
@@ -96,25 +98,6 @@ private def runCoreResult (result : Except String α) : RequestM α :=
 
 private def updateStore (store : SessionStore) : IO Unit :=
   dapSessionStoreRef.set store
-
-private def parseDeclName? (raw : String) : Option Name :=
-  let parts := raw.trimAscii.toString.splitOn "." |>.filter (· != "")
-  match parts with
-  | [] => none
-  | _ =>
-    some <| parts.foldl Name.str Name.anonymous
-
-private def isUnqualifiedName (n : Name) : Bool :=
-  match n with
-  | .str .anonymous _ => true
-  | .num .anonymous _ => true
-  | _ => false
-
-private def candidateEntryNames (moduleName entryName : Name) : Array Name :=
-  if isUnqualifiedName entryName then
-    #[entryName, moduleName ++ entryName]
-  else
-    #[entryName]
 
 private def stringLit? (e : Expr) : Option String :=
   match e with
@@ -346,27 +329,38 @@ def dapInitialize (_params : InitializeParams) : RequestM (RequestTask Initializ
 
 @[server_rpc_method]
 def dapLaunch (params : LaunchParams) : RequestM (RequestTask LaunchResponse) :=
-  RequestM.pureTask <| launchFromProgram params.program params.stopOnEntry params.breakpoints
+  RequestM.pureTask do
+    let launchProgram : Except String (Program × Array StmtSpan) := do
+      match params.programInfo?, params.program? with
+      | some info, _ =>
+        let info ← info.validate
+        pure (info.program, info.stmtSpans)
+      | none, some program =>
+        pure (program, #[])
+      | none, none =>
+        throw "Invalid launch payload: expected `programInfo` (preferred) or `program`."
+    let (program, stmtSpans) ← runCoreResult launchProgram
+    launchFromProgram program params.stopOnEntry params.breakpoints stmtSpans
 
 @[server_rpc_method]
 def dapLaunchMain (params : LaunchMainParams) : RequestM (RequestTask LaunchResponse) := do
   let declName ←
-    match parseDeclName? params.entryPoint with
+    match Dap.parseDeclName? params.entryPoint with
     | some declName => pure declName
     | none => throw <| mkInvalidParams s!"Invalid entry point name: '{params.entryPoint}'"
   let lspPos : Lsp.Position := { line := params.line, character := params.character }
   let doc ← RequestM.readDoc
-  let candidates := candidateEntryNames doc.meta.mod declName
+  let candidates := Dap.candidateDeclNames declName (moduleName? := some doc.meta.mod)
   RequestM.withWaitFindSnapAtPos lspPos fun snap => do
     let resolvedName? ←
       RequestM.runCoreM snap do
         let env ← getEnv
-        pure <| candidates.find? env.contains
+        pure <| Dap.resolveFirstDecl? env candidates
     let resolvedName ←
       match resolvedName? with
       | some name => pure name
       | none =>
-        let attempted := String.intercalate ", " <| candidates.toList.map (fun n => s!"'{n}'")
+        let attempted := Dap.renderCandidateDecls candidates
         throw <| mkInvalidParams
           s!"Could not resolve entry point '{params.entryPoint}'. Tried: {attempted}"
     let programInfo? ←

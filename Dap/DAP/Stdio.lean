@@ -6,7 +6,8 @@ Author: Emilio J. Gallego Arias
 
 import Lean
 import Lean.Data.Lsp.Communication
-import Dap.DAP.Core
+import Dap.Debugger.Core
+import Dap.DAP.Resolve
 import examples.Main
 
 open Lean
@@ -104,40 +105,6 @@ private def parseBreakpointLines (args : Json) : Array Nat :=
 private def spansFromProgramInfo (programInfo : ProgramInfo) : Array StmtSpan :=
   programInfo.stmtSpans
 
-private def parseDeclName? (raw : String) : Option Name :=
-  let parts := raw.trimAscii.toString.splitOn "." |>.filter (· != "")
-  match parts with
-  | [] => none
-  | _ =>
-    some <| parts.foldl Name.str Name.anonymous
-
-private def isUnqualifiedName (n : Name) : Bool :=
-  match n with
-  | .str .anonymous _ => true
-  | .num .anonymous _ => true
-  | _ => false
-
-private def candidateDeclNames (decl : Name) : Array Name :=
-  if isUnqualifiedName decl then
-    #[decl, `Main ++ decl, `Dap.Lang.Examples ++ decl]
-  else
-    #[decl]
-
-private def importProjectEnv : IO Environment := do
-  let candidates : Array (Array Name) :=
-    #[#[`Main, `Dap], #[`Main], #[`Dap]]
-  let rec go (idx : Nat) : IO Environment := do
-    if h : idx < candidates.size then
-      let modules := candidates[idx]
-      let imports : Array Import := modules.map (fun module => { module })
-      try
-        importModules imports {}
-      catch _ =>
-        go (idx + 1)
-    else
-      throw <| IO.userError "Could not import project modules (`Main` or `Dap`) to resolve entryPoint"
-  go 0
-
 private unsafe def evalLaunchProgramFromDecl
     (env : Environment) (opts : Options) (decl : Name) : Except String LaunchProgram := do
   match env.evalConstCheck ProgramInfo opts ``Dap.ProgramInfo decl with
@@ -155,18 +122,18 @@ private def programFromEntryPoint (entryPoint : String) : IO LaunchProgram := do
   let sysroot ← Lean.findSysroot
   Lean.initSearchPath sysroot [System.FilePath.mk ".lake/build/lib/lean"]
   let declName ←
-    match parseDeclName? entryPoint with
+    match Dap.parseDeclName? entryPoint with
     | some n => pure n
     | none => throw <| IO.userError s!"Invalid entryPoint '{entryPoint}'"
-  let env ← importProjectEnv
+  let env ← Dap.importProjectEnv
   let opts : Options := {}
-  let candidates := candidateDeclNames declName
-  let resolved? := candidates.find? env.contains
+  let candidates := Dap.candidateDeclNames declName (moduleName? := some `Main)
+  let resolved? := Dap.resolveFirstDecl? env candidates
   let resolved ←
     match resolved? with
     | some n => pure n
     | none =>
-      let attempted := String.intercalate ", " <| candidates.toList.map (fun n => s!"'{n}'")
+      let attempted := Dap.renderCandidateDecls candidates
       throw <| IO.userError s!"Could not resolve entryPoint '{entryPoint}'. Tried: {attempted}"
   match unsafe evalLaunchProgramFromDecl env opts resolved with
   | .ok launchProgram => pure launchProgram

@@ -8,6 +8,9 @@ name = "Dap"
 [[lean_lib]]
 name = "examples"
 
+[[lean_lib]]
+name = "Test"
+
 [[lean_exe]]
 name = "dap"
 root = "Main"

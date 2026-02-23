@@ -6,6 +6,7 @@ Author: Emilio J. Gallego Arias
 
 import Lean
 import Dap.Lang.Ast
+import Dap.DAP.Resolve
 import examples.Main
 
 open Lean
@@ -54,40 +55,6 @@ private def parseArgs : CliOptions → List String → Except String CliOptions
 private def normalizeDeclName (raw : String) : String :=
   raw.trimAscii.toString
 
-private def parseDeclName? (raw : String) : Option Name :=
-  let parts := raw.trimAscii.toString.splitOn "." |>.filter (· != "")
-  match parts with
-  | [] => none
-  | _ =>
-    some <| parts.foldl Name.str Name.anonymous
-
-private def isUnqualifiedName (n : Name) : Bool :=
-  match n with
-  | .str .anonymous _ => true
-  | .num .anonymous _ => true
-  | _ => false
-
-private def candidateDeclNames (decl : Name) : Array Name :=
-  if isUnqualifiedName decl then
-    #[decl, `Main ++ decl, `Dap.Lang.Examples ++ decl]
-  else
-    #[decl]
-
-private def importProjectEnv : IO Environment := do
-  let candidates : Array (Array Name) :=
-    #[#[`Main, `Dap], #[`Main], #[`Dap]]
-  let rec go (idx : Nat) : IO Environment := do
-    if h : idx < candidates.size then
-      let modules := candidates[idx]
-      let imports : Array Import := modules.map (fun module => { module })
-      try
-        importModules imports {}
-      catch _ =>
-        go (idx + 1)
-    else
-      throw <| IO.userError "Could not import project modules (`Main` or `Dap`) to resolve declaration"
-  go 0
-
 private unsafe def evalProgramInfoOrProgram
     (env : Environment) (opts : Options) (decl : Name) : Except String ProgramInfo := do
   match env.evalConstCheck ProgramInfo opts ``Dap.ProgramInfo decl with
@@ -104,18 +71,18 @@ private def loadProgramInfoFromDecl (rawDecl : String) : IO ProgramInfo := do
   let sysroot ← Lean.findSysroot
   Lean.initSearchPath sysroot [System.FilePath.mk ".lake/build/lib/lean"]
   let declName ←
-    match parseDeclName? rawDecl with
+    match Dap.parseDeclName? rawDecl with
     | some n => pure n
     | none => throw <| IO.userError s!"Invalid declaration name '{rawDecl}'"
-  let env ← importProjectEnv
+  let env ← Dap.importProjectEnv
   let opts : Options := {}
-  let candidates := candidateDeclNames declName
-  let resolved? := candidates.find? env.contains
+  let candidates := Dap.candidateDeclNames declName (moduleName? := some `Main)
+  let resolved? := Dap.resolveFirstDecl? env candidates
   let resolved ←
     match resolved? with
     | some n => pure n
     | none =>
-      let attempted := String.intercalate ", " <| candidates.toList.map (fun n => s!"'{n}'")
+      let attempted := Dap.renderCandidateDecls candidates
       throw <| IO.userError s!"Could not resolve declaration '{rawDecl}'. Tried: {attempted}"
   match unsafe evalProgramInfoOrProgram env opts resolved with
   | .ok info => pure info

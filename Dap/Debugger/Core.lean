@@ -5,7 +5,7 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
-import Dap.DAP.Session
+import Dap.Debugger.Session
 
 open Lean
 
