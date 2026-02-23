@@ -47,6 +47,9 @@ private def launchArgs (stopOnEntry : Bool) : Json :=
     [ ("programInfo", toJson Dap.Lang.Examples.mainProgram),
       ("stopOnEntry", toJson stopOnEntry) ]
 
+private def bumpEntryLine : Nat :=
+  Dap.Lang.Examples.mainProgram.locationToSourceLine { func := "bump", stmtLine := 1 }
+
 def testToyDapProtocolSanity : IO Unit := do
   let stdinPayload :=
     String.intercalate ""
@@ -148,6 +151,47 @@ def testToyDapNextStepsOverCall : IO Unit := do
   assertTrue "next over call returns to caller depth"
     (stdout.contains "\"totalFrames\":1")
 
+def testToyDapNextCanStopAtCalleeBreakpoint : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "setBreakpoints" <| Json.mkObj
+          [ ("breakpoints", Json.arr #[Json.mkObj [("line", toJson bumpEntryLine)]]) ],
+        encodeDapRequest 3 "launch" <| launchArgs true,
+        encodeDapRequest 4 "next",
+        encodeDapRequest 5 "next",
+        encodeDapRequest 6 "next",
+        encodeDapRequest 7 "stackTrace",
+        encodeDapRequest 8 "disconnect" ]
+  let stdout ← runToyDapPayload "toydap.next.callee.breakpoint" stdinPayload
+  assertTrue "third next response present"
+    (stdout.contains "\"request_seq\":6" && stdout.contains "\"command\":\"next\"")
+  assertTrue "third next can stop on callee breakpoint"
+    (appearsBefore stdout "\"request_seq\":6" "\"reason\":\"breakpoint\"")
+  assertTrue "stackTrace response present in callee-breakpoint flow"
+    (stdout.contains "\"request_seq\":7" && stdout.contains "\"command\":\"stackTrace\"")
+  assertTrue "callee-breakpoint flow has two frames"
+    (stdout.contains "\"totalFrames\":2")
+  assertTrue "callee-breakpoint flow stops in bump frame"
+    (stdout.contains "\"name\":\"bump:")
+
+def testToyDapLaunchWithEntryPointRejected : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "launch" <| Json.mkObj
+          [ ("entryPoint", toJson "mainProgram"),
+            ("stopOnEntry", toJson true) ],
+        encodeDapRequest 3 "stepIn",
+        encodeDapRequest 4 "disconnect" ]
+  let stdout ← runToyDapPayload "toydap.launch.entrypoint.rejected" stdinPayload
+  assertTrue "entryPoint launch request gets an error response"
+    (stdout.contains "\"request_seq\":2" &&
+      stdout.contains "launch requires 'programInfo'")
+  assertTrue "stepIn after rejected launch reports missing active session"
+    (stdout.contains "\"request_seq\":3" &&
+      stdout.contains "No active DAP session. Launch first.")
+
 def testToyDapLaunchTerminatesOrder : IO Unit := do
   let stdinPayload :=
     String.intercalate ""
@@ -171,6 +215,8 @@ def runTransportTests : IO Unit := do
   testToyDapContinueEventOrder
   testToyDapStepInOutProtocol
   testToyDapNextStepsOverCall
+  testToyDapNextCanStopAtCalleeBreakpoint
+  testToyDapLaunchWithEntryPointRejected
   testToyDapLaunchTerminatesOrder
 
 end Dap.Tests
