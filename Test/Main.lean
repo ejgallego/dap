@@ -1,6 +1,7 @@
 import Dap
 
 open Dap
+open Lean
 
 namespace Dap.Tests
 
@@ -165,6 +166,52 @@ def testDslProgramInfo : IO Unit := do
   assertTrue "statement spans have valid line range"
     (info.located.all fun located => located.span.startLine ≤ located.span.endLine)
 
+private def encodeDapRequest (seq : Nat) (command : String) (arguments : Json := Json.mkObj []) : String :=
+  let payload := Json.mkObj
+    [ ("seq", toJson seq),
+      ("type", toJson "request"),
+      ("command", toJson command),
+      ("arguments", arguments) ]
+  let data := Lean.Json.compress payload
+  s!"Content-Length: {String.utf8ByteSize data}\r\n\r\n{data}"
+
+def testToyDapProtocolSanity : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "launch" <| Json.mkObj
+          [ ("entryPoint", toJson "mainProgram"),
+            ("stopOnEntry", toJson true) ],
+        encodeDapRequest 3 "threads",
+        encodeDapRequest 4 "next",
+        encodeDapRequest 5 "disconnect" ]
+  let inputPath := ".dap/toydap.sanity.stdin"
+  IO.FS.createDirAll ".dap"
+  IO.FS.writeFile inputPath stdinPayload
+  let out ← IO.Process.output
+    { cmd := "bash"
+      args := #["-lc", s!".lake/build/bin/toydap < {inputPath}"] }
+  try
+    IO.FS.removeFile inputPath
+  catch _ =>
+    pure ()
+  assertEq "toydap exits cleanly" out.exitCode 0
+  let stdout := out.stdout
+  assertTrue "initialize response present"
+    (stdout.contains "\"request_seq\":1" && stdout.contains "\"command\":\"initialize\"")
+  assertTrue "initialized event present"
+    (stdout.contains "\"event\":\"initialized\"")
+  assertTrue "launch response present"
+    (stdout.contains "\"request_seq\":2" && stdout.contains "\"command\":\"launch\"")
+  assertTrue "stopped event present"
+    (stdout.contains "\"event\":\"stopped\"")
+  assertTrue "threads response present"
+    (stdout.contains "\"request_seq\":3" && stdout.contains "\"command\":\"threads\"")
+  assertTrue "next response present"
+    (stdout.contains "\"request_seq\":4" && stdout.contains "\"command\":\"next\"")
+  assertTrue "disconnect response present"
+    (stdout.contains "\"request_seq\":5" && stdout.contains "\"command\":\"disconnect\"")
+
 end Dap.Tests
 
 def main : IO Unit := do
@@ -177,4 +224,5 @@ def main : IO Unit := do
   Dap.Tests.testDebugSessionStepBack
   Dap.Tests.testDslProgram
   Dap.Tests.testDslProgramInfo
+  Dap.Tests.testToyDapProtocolSanity
   IO.println "All tests passed."
