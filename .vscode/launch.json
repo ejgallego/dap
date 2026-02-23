@@ -5,7 +5,7 @@
       "name": "Toy DAP (auto-export ProgramInfo)",
       "type": "lean-toy-dap",
       "request": "launch",
-      "source": "${workspaceFolder}/Dap/Examples.lean",
+      "source": "${workspaceFolder}/examples/Main.lean",
       "programInfoFile": "${workspaceFolder}/.dap/programInfo.generated.json",
       "stopOnEntry": true,
       "preLaunchTask": "Generate Toy DAP ProgramInfo"
