@@ -283,6 +283,33 @@ def testDebugCoreStepInOut : IO Unit := do
   assertEq "step in/out return from main reason" outMain.stopReason "terminated"
   assertEq "step in/out return from main terminated" outMain.terminated true
 
+def testDebugCoreNextStepsOverCall : IO Unit := do
+  let info : ProgramInfo := dap%[
+    def double(x) := {
+      let two := 2,
+      let out := mul x two,
+      return out
+    },
+    def main() := {
+      let a := 4,
+      let b := call double(a),
+      let c := add b a
+    }
+  ]
+  let store0 : SessionStore := {}
+  let (store1, launch) ← expectCore "step over launch" <| Dap.launchFromProgramInfo store0 info true #[]
+  assertEq "step over launch reason" launch.stopReason "entry"
+  let sessionId := launch.sessionId
+  let (store2, _) ← expectCore "step over next 1" <| Dap.next store1 sessionId
+  let (store3, nextOver) ← expectCore "step over call" <| Dap.next store2 sessionId
+  assertEq "step over call reason" nextOver.stopReason "step"
+  assertEq "step over call terminated" nextOver.terminated false
+  let stackAfterCall ← expectCore "step over stack after call" <| Dap.stackTrace store3 sessionId
+  assertEq "step over stays in caller frame" stackAfterCall.totalFrames 1
+  let vars ← expectCore "step over vars after call" <| Dap.variables store3 sessionId 1
+  assertTrue "step over computed call result in caller"
+    (vars.variables.any fun v => v.name == "b" && v.value == "8")
+
 def testDslProgram : IO Unit := do
   let info : ProgramInfo := dap%[
     def main() := {
@@ -416,7 +443,7 @@ def testDebugCoreStackFrames : IO Unit := do
   let sessionId := launch.sessionId
   let (store2, _) ← expectCore "stack frames next 1" <| Dap.next store1 sessionId
   let (store3, _) ← expectCore "stack frames next 2" <| Dap.next store2 sessionId
-  let (store4, _) ← expectCore "stack frames next call" <| Dap.next store3 sessionId
+  let (store4, _) ← expectCore "stack frames stepIn call" <| Dap.stepIn store3 sessionId
   let stack ← expectCore "stack frames stackTrace" <| Dap.stackTrace store4 sessionId
   assertEq "stack frames total" stack.totalFrames 2
   let top := stack.stackFrames[0]?.getD default
@@ -512,6 +539,7 @@ def runCoreTests : IO Unit := do
   testDebugSessionContinueAndBreakpoints
   testDebugSessionStepBack
   testDebugCoreStepInOut
+  testDebugCoreNextStepsOverCall
   testDslProgram
   testDslNegativeLiteral
   testDslFunctionCall

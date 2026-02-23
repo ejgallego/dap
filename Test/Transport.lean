@@ -133,6 +133,26 @@ def testToyDapStepInOutProtocol : IO Unit := do
     (appearsBefore stdout "\"request_seq\":5" "\"event\":\"stopped\"" ||
       appearsBefore stdout "\"request_seq\":5" "\"event\":\"terminated\"")
 
+def testToyDapNextStepsOverCall : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "launch" <| Json.mkObj
+          [ ("entryPoint", toJson "mainProgram"),
+            ("stopOnEntry", toJson true) ],
+        encodeDapRequest 3 "next",
+        encodeDapRequest 4 "next",
+        encodeDapRequest 5 "next",
+        encodeDapRequest 6 "stackTrace",
+        encodeDapRequest 7 "disconnect" ]
+  let stdout ← runToyDapPayload "toydap.next.stepover" stdinPayload
+  assertTrue "third next response present"
+    (stdout.contains "\"request_seq\":5" && stdout.contains "\"command\":\"next\"")
+  assertTrue "stackTrace response present"
+    (stdout.contains "\"request_seq\":6" && stdout.contains "\"command\":\"stackTrace\"")
+  assertTrue "next over call returns to caller depth"
+    (stdout.contains "\"totalFrames\":1")
+
 def testToyDapLaunchTerminatesOrder : IO Unit := do
   let stdinPayload :=
     String.intercalate ""
@@ -157,6 +177,7 @@ def runTransportTests : IO Unit := do
   testToyDapBreakpointProtocol
   testToyDapContinueEventOrder
   testToyDapStepInOutProtocol
+  testToyDapNextStepsOverCall
   testToyDapLaunchTerminatesOrder
 
 end Dap.Tests
