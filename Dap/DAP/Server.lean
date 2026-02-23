@@ -6,7 +6,6 @@ Author: Emilio J. Gallego Arias
 
 import Lean
 import Dap.Debugger.Core
-import Dap.DAP.Launch
 
 open Lean Lean.Server
 
@@ -26,14 +25,6 @@ structure InitializeResponse where
 
 structure LaunchParams where
   programInfo : ProgramInfo
-  stopOnEntry : Bool := true
-  breakpoints : Array Nat := #[]
-  deriving Inhabited, Repr, FromJson, ToJson
-
-structure LaunchMainParams where
-  entryPoint : String := "mainProgram"
-  line : Nat := 0
-  character : Nat := 0
   stopOnEntry : Bool := true
   breakpoints : Array Nat := #[]
   deriving Inhabited, Repr, FromJson, ToJson
@@ -118,22 +109,6 @@ def dapLaunch (params : LaunchParams) : RequestM (RequestTask LaunchResponse) :=
   RequestM.pureTask do
     let info ← runCoreResult params.programInfo.validate
     launchFromProgramInfo info params.stopOnEntry params.breakpoints
-
-@[server_rpc_method]
-def dapLaunchMain (params : LaunchMainParams) : RequestM (RequestTask LaunchResponse) := do
-  let lspPos : Lsp.Position := { line := params.line, character := params.character }
-  let doc ← RequestM.readDoc
-  RequestM.withWaitFindSnapAtPos lspPos fun snap => do
-    let launchProgramResult ←
-      RequestM.runCoreM snap do
-        let env ← getEnv
-        pure <|
-          Dap.resolveLaunchProgramFromEnv
-            env
-            params.entryPoint
-            (moduleName? := some doc.meta.mod)
-    let launchProgram ← runCoreResult launchProgramResult
-    launchFromProgramInfo launchProgram.programInfo params.stopOnEntry params.breakpoints
 
 @[server_rpc_method]
 def dapSetBreakpoints (params : SetBreakpointsParams) :

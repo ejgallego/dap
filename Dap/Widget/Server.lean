@@ -21,33 +21,92 @@ function clamp(v, lo, hi) {
   return Math.min(Math.max(v, lo), hi);
 }
 
+function groupProgramByFunction(program) {
+  const groups = [];
+  for (const line of program) {
+    const last = groups.length > 0 ? groups[groups.length - 1] : null;
+    if (!last || last.functionName !== line.functionName) {
+      groups.push({ functionName: line.functionName, lines: [line] });
+    } else {
+      last.lines.push(line);
+    }
+  }
+  return groups;
+}
+
 export default function(props) {
-  const states = Array.isArray(props.states) ? props.states : [];
-  const program = Array.isArray(props.program) ? props.program : [];
+  const states = props.states;
+  const program = props.program;
+  const programGroups = groupProgramByFunction(program);
   const maxIndex = Math.max(states.length - 1, 0);
   const [cursor, setCursor] = React.useState(0);
   const idx = clamp(cursor, 0, maxIndex);
-  const state = states[idx] || { functionName: 'main', pc: 0, callDepth: 1, bindings: [] };
+  const state = states[idx];
 
   const canBack = idx > 0;
   const canForward = idx < maxIndex;
 
-  const programItems = program.map((line, i) =>
+  const programSections = programGroups.map((group, groupIdx) =>
+    e('div', { key: 'group-' + String(groupIdx), style: { marginBottom: '12px' } }, [
+      e(
+        'div',
+        {
+          key: 'header',
+          style: {
+            fontWeight: 700,
+            borderBottom: '1px solid #e3e6ec',
+            marginBottom: '4px',
+            paddingBottom: '2px'
+          }
+        },
+        'def ' + group.functionName + '(...)'
+      ),
+      e(
+        'ol',
+        { key: 'lines', style: { margin: 0, paddingLeft: '20px' } },
+        group.lines.map((line, lineIdx) =>
+          e(
+            'li',
+            {
+              key: 'line-' + String(lineIdx) + '-' + line.functionName + '-' + String(line.stmtLine),
+              style: {
+                background:
+                  state.functionName === line.functionName && state.stmtLine === line.stmtLine
+                    ? '#e9f2ff'
+                    : 'transparent',
+                borderRadius: '4px',
+                padding: '2px 4px 2px 10px',
+                marginBottom: '2px'
+              }
+            },
+            '[L' + String(line.sourceLine) + '] ' + String(line.stmtLine) + '  ' + line.text
+          )
+        )
+      )
+    ])
+  );
+
+  const callStackRows = state.callStack.map((frame, i) =>
     e(
       'li',
       {
         key: i,
         style: {
-          background: state.functionName === 'main' && state.pc === i ? '#e9f2ff' : 'transparent',
-          borderRadius: '4px',
-          padding: '2px 4px'
+          fontWeight: i === 0 ? 700 : 400,
+          opacity: i === 0 ? 1.0 : 0.85
         }
       },
-      line
+      (i === 0 ? '-> ' : '   ') +
+        frame.functionName +
+        ':' +
+        String(frame.stmtLine) +
+        ' [L' +
+        String(frame.sourceLine) +
+        ']'
     )
   );
 
-  const envRows = (state.bindings || []).map((binding, i) =>
+  const envRows = state.bindings.map((binding, i) =>
     e('li', { key: i }, binding.name + ' = ' + String(binding.value))
   );
 
@@ -68,21 +127,31 @@ export default function(props) {
         e('span', { key: 'step' }, 'State ' + String(idx) + '/' + String(maxIndex)),
         e('span', { key: 'fn', style: { marginLeft: '8px' } }, 'fn = ' + String(state.functionName)),
         e('span', { key: 'pc', style: { marginLeft: '8px' } }, 'pc = ' + String(state.pc)),
+        e('span', { key: 'stmt', style: { marginLeft: '8px' } }, 'stmt = ' + String(state.stmtLine)),
+        e('span', { key: 'src', style: { marginLeft: '8px' } }, 'src = ' + String(state.sourceLine)),
         e('span', { key: 'depth', style: { marginLeft: '8px' } }, 'depth = ' + String(state.callDepth))
       ]),
       e('div', {
         key: 'body',
-        style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }
+        style: { display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: '12px' }
       }, [
         e('div', { key: 'program' }, [
           e('div', { key: 'title', style: { marginBottom: '4px', fontWeight: 600 } }, 'Program'),
-          e('ol', { key: 'list', style: { margin: 0, paddingLeft: '20px' } }, programItems)
+          e('div', { key: 'list' }, programSections)
         ]),
-        e('div', { key: 'env' }, [
-          e('div', { key: 'title', style: { marginBottom: '4px', fontWeight: 600 } }, 'Environment'),
-          envRows.length === 0
-            ? e('p', { key: 'empty', style: { margin: 0, opacity: 0.7 } }, '(empty)')
-            : e('ul', { key: 'rows', style: { margin: 0, paddingLeft: '20px' } }, envRows)
+        e('div', { key: 'side' }, [
+          e('div', { key: 'stack', style: { marginBottom: '12px' } }, [
+            e('div', { key: 'title', style: { marginBottom: '4px', fontWeight: 600 } }, 'Call Stack'),
+            callStackRows.length === 0
+              ? e('p', { key: 'empty', style: { margin: 0, opacity: 0.7 } }, '(empty)')
+              : e('ul', { key: 'rows', style: { margin: 0, paddingLeft: '20px' } }, callStackRows)
+          ]),
+          e('div', { key: 'env' }, [
+            e('div', { key: 'title', style: { marginBottom: '4px', fontWeight: 600 } }, 'Environment'),
+            envRows.length === 0
+              ? e('p', { key: 'empty', style: { margin: 0, opacity: 0.7 } }, '(empty)')
+              : e('ul', { key: 'rows', style: { margin: 0, paddingLeft: '20px' } }, envRows)
+          ])
         ])
       ])
     ]);

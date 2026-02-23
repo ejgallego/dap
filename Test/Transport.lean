@@ -42,13 +42,16 @@ private def appearsBefore (s first second : String) : Bool :=
     let afterFirst := String.intercalate first tail
     afterFirst.contains second
 
+private def launchArgs (stopOnEntry : Bool) : Json :=
+  Json.mkObj
+    [ ("programInfo", toJson Dap.Lang.Examples.mainProgram),
+      ("stopOnEntry", toJson stopOnEntry) ]
+
 def testToyDapProtocolSanity : IO Unit := do
   let stdinPayload :=
     String.intercalate ""
       [ encodeDapRequest 1 "initialize",
-        encodeDapRequest 2 "launch" <| Json.mkObj
-          [ ("entryPoint", toJson "mainProgram"),
-            ("stopOnEntry", toJson true) ],
+        encodeDapRequest 2 "launch" <| launchArgs true,
         encodeDapRequest 3 "threads",
         encodeDapRequest 4 "next",
         encodeDapRequest 5 "disconnect" ]
@@ -72,9 +75,7 @@ def testToyDapBreakpointProtocol : IO Unit := do
       [ encodeDapRequest 1 "initialize",
         encodeDapRequest 2 "setBreakpoints" <| Json.mkObj
           [ ("breakpoints", Json.arr #[Json.mkObj [("line", toJson (22 : Nat))]]) ],
-        encodeDapRequest 3 "launch" <| Json.mkObj
-          [ ("entryPoint", toJson "mainProgram"),
-            ("stopOnEntry", toJson false) ],
+        encodeDapRequest 3 "launch" <| launchArgs false,
         encodeDapRequest 4 "disconnect" ]
   let stdout ← runToyDapPayload "toydap.breakpoint" stdinPayload
   assertTrue "setBreakpoints response present"
@@ -92,9 +93,7 @@ def testToyDapContinueEventOrder : IO Unit := do
   let stdinPayload :=
     String.intercalate ""
       [ encodeDapRequest 1 "initialize",
-        encodeDapRequest 2 "launch" <| Json.mkObj
-          [ ("entryPoint", toJson "mainProgram"),
-            ("stopOnEntry", toJson true) ],
+        encodeDapRequest 2 "launch" <| launchArgs true,
         encodeDapRequest 3 "continue",
         encodeDapRequest 4 "disconnect" ]
   let stdout ← runToyDapPayload "toydap.continue" stdinPayload
@@ -115,9 +114,7 @@ def testToyDapStepInOutProtocol : IO Unit := do
   let stdinPayload :=
     String.intercalate ""
       [ encodeDapRequest 1 "initialize",
-        encodeDapRequest 2 "launch" <| Json.mkObj
-          [ ("entryPoint", toJson "mainProgram"),
-            ("stopOnEntry", toJson true) ],
+        encodeDapRequest 2 "launch" <| launchArgs true,
         encodeDapRequest 3 "stepIn",
         encodeDapRequest 4 "stepIn",
         encodeDapRequest 5 "stepOut",
@@ -137,9 +134,7 @@ def testToyDapLaunchTerminatesOrder : IO Unit := do
   let stdinPayload :=
     String.intercalate ""
       [ encodeDapRequest 1 "initialize",
-        encodeDapRequest 2 "launch" <| Json.mkObj
-          [ ("entryPoint", toJson "mainProgram"),
-            ("stopOnEntry", toJson false) ],
+        encodeDapRequest 2 "launch" <| launchArgs false,
         encodeDapRequest 3 "disconnect" ]
   let stdout ← runToyDapPayload "toydap.launch.terminates" stdinPayload
   assertTrue "initialized event emitted before launch response"

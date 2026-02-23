@@ -91,7 +91,6 @@ Registered in `Dap.Server`:
 
 - `Dap.Server.dapInitialize`
 - `Dap.Server.dapLaunch`
-- `Dap.Server.dapLaunchMain`
 - `Dap.Server.dapSetBreakpoints`
 - `Dap.Server.dapThreads`
 - `Dap.Server.dapStackTrace`
@@ -106,7 +105,6 @@ Registered in `Dap.Server`:
 - `Dap.Server.dapDisconnect`
 
 `dapLaunch` accepts only `programInfo`.
-`dapLaunchMain` resolves an entry declaration and requires it to be `Dap.ProgramInfo`.
 
 ## Widget usage
 
@@ -118,14 +116,14 @@ import examples.Main
 #widget Dap.traceExplorerWidget with Dap.Lang.Examples.sampleTraceProps
 ```
 
-The widget shows current function, pc, call depth, and locals over time-travelled states.
+The widget shows grouped function code, current function/pc/source location, call stack, and locals over time-travelled states.
 
 ## VS Code side-load client
 
 The `client/` extension launches `toydap`.
 
 See `client/README.md` for build/sideload and launch configuration.
-Launch inputs are `entryPoint` (default `mainProgram`) or `programInfo` / `programInfoFile`.
+Launch input is `programInfo` (`Dap.ProgramInfo` JSON payload).
 
 ## ProgramInfo export helper
 

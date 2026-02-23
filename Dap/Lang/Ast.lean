@@ -219,17 +219,6 @@ def locationToSourceLine? (info : ProgramInfo) (loc : StmtLocation) : Option Nat
 def locationToSourceLine (info : ProgramInfo) (loc : StmtLocation) : Nat :=
   (locationToSourceLine? info loc).getD loc.stmtLine
 
-def lineToStmtIdx? (info : ProgramInfo) (line : Nat) : Option Nat :=
-  let loc? := sourceLineToLocation? info line
-  match loc? with
-  | some loc =>
-    if loc.func = Program.mainName then
-      some (loc.stmtLine - 1)
-    else
-      none
-  | none =>
-    none
-
 end ProgramInfo
 
 end Dap
