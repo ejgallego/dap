@@ -5,7 +5,7 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Dap
-import Dap.Examples
+import Dap.Lang.Examples
 
 open Dap
 
@@ -14,7 +14,7 @@ private def renderBindings (ctx : Context) : String :=
   String.intercalate ", " parts
 
 def main : IO Unit := do
-  match Examples.sampleFinalContext with
+  match Dap.Lang.Examples.sampleFinalContext with
   | .error err =>
     IO.eprintln s!"Evaluation failed: {err}"
   | .ok ctx =>

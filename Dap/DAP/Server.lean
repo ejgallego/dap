@@ -5,7 +5,7 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
-import Dap.DebugCore
+import Dap.DAP.Core
 
 open Lean Lean.Server
 

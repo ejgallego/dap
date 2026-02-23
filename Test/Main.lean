@@ -125,10 +125,18 @@ def testDebugSessionContinueAndBreakpoints : IO Unit := do
     throw <| IO.userError s!"testDebugSessionContinueAndBreakpoints failed to launch: {err}"
   | .ok session =>
     let session := session.setBreakpoints #[3]
-    let (stopped, reason) := session.initialStop (stopOnEntry := false)
+    let (stopped, reason) ←
+      match session.initialStop (stopOnEntry := false) with
+      | .ok value => pure value
+      | .error err =>
+        throw <| IO.userError s!"testDebugSessionContinueAndBreakpoints initialStop failed: {err}"
     assertEq "continue initial reason" reason .breakpoint
     assertEq "continue stopped line" stopped.currentLine 3
-    let (done, doneReason) := stopped.continueExecution
+    let (done, doneReason) ←
+      match stopped.continueExecution with
+      | .ok value => pure value
+      | .error err =>
+        throw <| IO.userError s!"testDebugSessionContinueAndBreakpoints continue failed: {err}"
     assertEq "continue end reason" doneReason .terminated
     assertEq "continue end cursor" done.cursor done.maxCursor
 
@@ -142,7 +150,11 @@ def testDebugSessionStepBack : IO Unit := do
   | .error err =>
     throw <| IO.userError s!"testDebugSessionStepBack failed to launch: {err}"
   | .ok session =>
-    let (forwarded, _) := session.next
+    let (forwarded, _) ←
+      match session.next with
+      | .ok value => pure value
+      | .error err =>
+        throw <| IO.userError s!"testDebugSessionStepBack next failed: {err}"
     let (backward, reason) := forwarded.stepBack
     assertEq "stepBack reason" reason .step
     assertEq "stepBack cursor" backward.cursor 0
@@ -160,7 +172,7 @@ def testDslProgram : IO Unit := do
     assertSomeEq "dsl result" (ctx.lookup? "z") 13
 
 def testDslProgramInfo : IO Unit := do
-  let info : ProgramInfo := dapInfo%[
+  let info : ProgramInfo := dap%[
     let a := 1,
     let b := 2,
     let c := mul a b

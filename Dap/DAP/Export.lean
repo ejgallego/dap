@@ -5,8 +5,8 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
-import Dap.Syntax
-import Dap.Examples
+import Dap.Lang.Ast
+import Dap.Lang.Examples
 
 open Lean
 
@@ -30,7 +30,7 @@ def usage : String := String.intercalate "\n"
     "Default: --decl mainProgram",
     "Name resolution for unqualified names tries:",
     "  1) <name>",
-    "  2) Dap.Examples.<name>" ]
+    "  2) Dap.Lang.Examples.<name>" ]
 
 private def parseArgs : CliOptions → List String → Except String CliOptions
   | opts, [] =>
@@ -68,7 +68,7 @@ private def isUnqualifiedName (n : Name) : Bool :=
 
 private def candidateDeclNames (decl : Name) : Array Name :=
   if isUnqualifiedName decl then
-    #[decl, `Dap.Examples ++ decl]
+    #[decl, `Dap.Lang.Examples ++ decl]
   else
     #[decl]
 
@@ -91,7 +91,7 @@ private def loadProgramInfoFromDecl (rawDecl : String) : IO ProgramInfo := do
     match parseDeclName? rawDecl with
     | some n => pure n
     | none => throw <| IO.userError s!"Invalid declaration name '{rawDecl}'"
-  let env ← importModules #[`Dap.Examples] {}
+  let env ← importModules #[`Dap.Lang.Examples] {}
   let opts : Options := {}
   let candidates := candidateDeclNames declName
   let resolved? := candidates.find? env.contains

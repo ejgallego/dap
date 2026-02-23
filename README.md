@@ -10,15 +10,17 @@ Lean 4 toy project for:
 
 ## Project layout
 
-- `Dap/Syntax.lean`: core AST (`Program` is a list of `let` statements).
-- `Dap/Surface.lean`: DSL syntax/macros (`dap%[...]`, `dapInfo%[...]`) + infotree metadata.
-- `Dap/Eval.lean`: environment, small-step semantics, and full program runner.
-- `Dap/Trace.lean`: execution trace and navigation API (`Explorer`).
-- `Dap/DebugModel.lean`: pure debugger session model (breakpoints, continue, next, stepBack).
-- `Dap/Server.lean`: Lean server RPC endpoints implementing DAP-like operations.
-- `Dap/ToyDap.lean`: standalone DAP adapter implementation (native DAP protocol over stdio).
-- `Dap/Widget.lean`: widget props + `traceExplorerWidget`.
-- `Dap/Examples.lean`: sample program and precomputed widget props.
+- `Dap/Lang/Ast.lean`: core AST (`Program` is a list of `let` statements).
+- `Dap/Lang/Dsl.lean`: DSL syntax/macros (`dap%[...]`) + infotree metadata.
+- `Dap/Lang/Eval.lean`: environment, small-step semantics, and full program runner.
+- `Dap/Lang/Trace.lean`: execution trace and navigation API (`Explorer`).
+- `Dap/Lang/Examples.lean`: sample program and precomputed widget props.
+- `Dap/DAP/Session.lean`: pure debugger session model (breakpoints, continue, next, stepBack).
+- `Dap/DAP/Core.lean`: session store + DAP-shaped pure core operations.
+- `Dap/DAP/Server.lean`: Lean server RPC endpoints implementing DAP-like operations.
+- `Dap/DAP/Stdio.lean`: standalone DAP adapter implementation (native DAP protocol over stdio).
+- `Dap/Widget/Server.lean`: widget props + `traceExplorerWidget`.
+- `Dap/DAP/Export.lean`: `dap-export` declaration loader/export logic.
 - `Test/Main.lean`: executable tests.
 - `client/`: VS Code extension scaffold for side-loading (`lean-toy-dap` debug type).
 - `DAP_PLAN.md`: roadmap to expose this runtime over DAP.
@@ -35,12 +37,11 @@ lake exe dap-tests
 
 ## DSL syntax and coloring
 
-The toy language now has Lean syntax categories and term elaborators:
+The toy language now has Lean syntax categories and one term elaborator:
 
-- `dap%[...] : Dap.Program`
-- `dapInfo%[...] : Dap.ProgramInfo`
+- `dap%[...] : Dap.ProgramInfo` (coerces to `Dap.Program` when needed)
 
-Both forms use statements of the shape:
+The DSL uses statements of the shape:
 
 ```lean
 let v := N
@@ -62,7 +63,18 @@ def p : Dap.Program := dap%[
 
 Keywords/operators (`let`, `add`, `sub`, `mul`, `div`) and literals/idents are tokenized through Lean's parser, so they receive syntax highlighting in editors.
 
-`dapInfo%[...]` preserves per-statement source spans in `ProgramInfo.located`.
+`dap%[...]` preserves per-statement source spans in `ProgramInfo.located`.
+
+## Execution model
+
+The debugger now follows a stepper-first design:
+- the interpreter exposes single-step execution (`step`) as the semantic foundation,
+- the debug engine drives execution step-by-step and keeps history for reverse stepping (`stepBack`).
+
+This keeps interpreter semantics explicit and is easier to teach as the base language grows.
+
+Trace utilities (`Dap/Lang/Trace.lean`) are still available for visualization and analysis.
+If there is user demand for a full trace-first debug mode, we would welcome a PR adding that setup.
 
 ## Lean RPC debug methods
 
@@ -86,14 +98,14 @@ They are designed to be called over Lean's `$/lean/rpc/call` transport.
 
 `dapLaunchMain` is the preferred entry for the VS Code prototype flow:
 - open a Lean file,
-- define `mainProgram : Dap.Program`,
+- define `mainProgram : Dap.Program` (or `Dap.ProgramInfo`),
 - launch `lean-toy-dap` with `source = ${file}` and `entryPoint = "mainProgram"`.
 
-`entryPoint` resolves declarations dynamically (unqualified names also try `Dap.Examples.<name>`). The declaration may be either `Dap.Program` or `Dap.ProgramInfo`.
+`entryPoint` resolves declarations dynamically (unqualified names also try `Dap.Lang.Examples.<name>`). The declaration may be either `Dap.Program` or `Dap.ProgramInfo`.
 
 ## Infotree metadata
 
-When elaborating `dap%[...]` or `dapInfo%[...]`, the elaborator stores custom infotree nodes carrying the statement-location payload.
+When elaborating `dap%[...]`, the elaborator stores custom infotree nodes carrying the statement-location payload.
 
 Use `Dap.getProgramSyntaxInfo?` to decode these custom nodes from `Elab.Info` entries when building source-aware tooling.
 
@@ -102,9 +114,9 @@ Use `Dap.getProgramSyntaxInfo?` to decode these custom nodes from `Elab.Info` en
 In a Lean file:
 
 ```lean
-import Dap.Examples
+import Dap.Lang.Examples
 
-#widget Dap.traceExplorerWidget with Dap.Examples.sampleTraceProps
+#widget Dap.traceExplorerWidget with Dap.Lang.Examples.sampleTraceProps
 ```
 
 Place the cursor on the `#widget` command in the infoview to interact with:
@@ -124,9 +136,11 @@ See `client/README.md` for build/sideload steps and launch configuration details
 Use `dap-export` to generate source-aware JSON from a Lean declaration:
 
 ```bash
-lake exe dap-export --decl Dap.Examples.mainProgramInfo --out .dap/programInfo.generated.json
+lake exe dap-export --decl Dap.Lang.Examples.mainProgramInfo --out .dap/programInfo.generated.json
 ```
 
 `--decl` also accepts `Dap.Program` declarations; these are exported as `ProgramInfo` with empty `located` spans.
+Default is `--decl mainProgram`.
+For unqualified names, resolution tries `<name>` and then `Dap.Lang.Examples.<name>`.
 
 The repository `.vscode/launch.json` includes a config that runs this command as a `preLaunchTask`.

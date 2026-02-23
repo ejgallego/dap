@@ -4,15 +4,15 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Author: Emilio J. Gallego Arias
 -/
 
-import Dap.Widget
-import Dap.Surface
-import Dap.Server
+import Dap.Widget.Server
+import Dap.Lang.Dsl
+import Dap.DAP.Server
 
-namespace Dap.Examples
+namespace Dap.Lang.Examples
 
 open Dap
 
-def sampleProgramInfo : ProgramInfo := dapInfo%[
+def sampleProgramInfo : ProgramInfo := dap%[
   let x := 6,
   let y := 3,
   let z := 4,
@@ -38,6 +38,6 @@ def sampleTraceProps : TraceWidgetProps :=
   | .ok props => props
   | .error _ => default
 
-end Dap.Examples
+end Dap.Lang.Examples
 
-#widget Dap.traceExplorerWidget with Dap.Examples.sampleTraceProps
+#widget Dap.traceExplorerWidget with Dap.Lang.Examples.sampleTraceProps

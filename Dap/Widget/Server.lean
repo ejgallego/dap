@@ -5,7 +5,7 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
-import Dap.Trace
+import Dap.Lang.Trace
 
 open Lean Widget
 

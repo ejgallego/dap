@@ -6,8 +6,8 @@ Author: Emilio J. Gallego Arias
 
 import Lean
 import Lean.Data.Lsp.Communication
-import Dap.DebugCore
-import Dap.Examples
+import Dap.DAP.Core
+import Dap.Lang.Examples
 
 open Lean
 
@@ -119,7 +119,7 @@ private def isUnqualifiedName (n : Name) : Bool :=
 
 private def candidateDeclNames (decl : Name) : Array Name :=
   if isUnqualifiedName decl then
-    #[decl, `Dap.Examples ++ decl]
+    #[decl, `Dap.Lang.Examples ++ decl]
   else
     #[decl]
 
@@ -142,7 +142,7 @@ private def programFromEntryPoint (entryPoint : String) : IO LaunchProgram := do
     match parseDeclName? entryPoint with
     | some n => pure n
     | none => throw <| IO.userError s!"Invalid entryPoint '{entryPoint}'"
-  let env ← importModules #[`Dap.Examples] {}
+  let env ← importModules #[`Dap.Lang.Examples] {}
   let opts : Options := {}
   let candidates := candidateDeclNames declName
   let resolved? := candidates.find? env.contains

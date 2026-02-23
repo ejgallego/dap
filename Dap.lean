@@ -4,13 +4,13 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Author: Emilio J. Gallego Arias
 -/
 
-import Dap.Syntax
-import Dap.Surface
-import Dap.Eval
-import Dap.Trace
-import Dap.DebugModel
-import Dap.DebugCore
-import Dap.Export
-import Dap.Server
-import Dap.Widget
-import Dap.Examples
+import Dap.Lang.Ast
+import Dap.Lang.Dsl
+import Dap.Lang.Eval
+import Dap.Lang.Trace
+import Dap.DAP.Session
+import Dap.DAP.Core
+import Dap.DAP.Export
+import Dap.DAP.Server
+import Dap.Widget.Server
+import Dap.Lang.Examples

@@ -4,7 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Author: Emilio J. Gallego Arias
 -/
 
-import Dap.Trace
+import Dap.Lang.Eval
 
 namespace Dap
 
@@ -25,35 +25,32 @@ instance : ToString StopReason where
     | .terminated => "terminated"
 
 structure DebugSession where
-  trace : ExecutionTrace
+  program : Program
+  history : Array Context := #[Context.initial]
   cursor : Nat := 0
   breakpoints : Array Nat := #[]
   deriving Repr
 
 namespace DebugSession
 
-def fromTrace (trace : ExecutionTrace) : DebugSession :=
-  { trace }
-
 def fromProgram (program : Program) : Except EvalError DebugSession := do
-  let trace ← ExecutionTrace.build program
-  pure (fromTrace trace)
+  pure { program }
 
 def maxCursor (session : DebugSession) : Nat :=
-  session.trace.states.size - 1
+  session.history.size - 1
 
 def normalize (session : DebugSession) : DebugSession :=
   { session with cursor := min session.cursor session.maxCursor }
 
 def current? (session : DebugSession) : Option Context :=
   let session := session.normalize
-  session.trace.states[session.cursor]?
+  session.history[session.cursor]?
 
 def currentPc (session : DebugSession) : Nat :=
   (session.current?.map (·.pc)).getD 0
 
 def currentLine (session : DebugSession) : Nat :=
-  let psize := session.trace.program.size
+  let psize := session.program.size
   let fallback := max psize 1
   if psize = 0 then
     1
@@ -67,8 +64,7 @@ def currentLine (session : DebugSession) : Nat :=
         psize
 
 def atEnd (session : DebugSession) : Bool :=
-  let session := session.normalize
-  session.cursor >= session.maxCursor
+  (session.current?.map (fun ctx => decide (ctx.pc >= session.program.size))).getD true
 
 def isValidBreakpointLine (programSize line : Nat) : Bool :=
   0 < line && line <= programSize
@@ -83,7 +79,7 @@ def normalizeBreakpoints (programSize : Nat) (lines : Array Nat) : Array Nat :=
         acc)
 
 def setBreakpoints (session : DebugSession) (lines : Array Nat) : DebugSession :=
-  { session with breakpoints := normalizeBreakpoints session.trace.program.size lines }
+  { session with breakpoints := normalizeBreakpoints session.program.size lines }
 
 def isBreakpointLine (session : DebugSession) (line : Nat) : Bool :=
   session.breakpoints.contains line
@@ -94,16 +90,32 @@ def hitBreakpoint (session : DebugSession) : Bool :=
 def bindings (session : DebugSession) : Array (Var × Value) :=
   (session.current?.map Context.bindings).getD #[]
 
-def next (session : DebugSession) : DebugSession × StopReason :=
+def next (session : DebugSession) : Except EvalError (DebugSession × StopReason) := do
   let session := session.normalize
-  if session.atEnd then
-    (session, .terminated)
-  else
+  if session.cursor + 1 < session.history.size then
     let next := { session with cursor := session.cursor + 1 }
     if next.atEnd then
-      (next, .terminated)
+      pure (next, .terminated)
     else
-      (next, .step)
+      pure (next, .step)
+  else
+    let ctx ←
+      match session.current? with
+      | some ctx => pure ctx
+      | none => throw (.invalidPc session.cursor session.history.size)
+    if ctx.pc >= session.program.size then
+      pure (session, .terminated)
+    else
+      match ← step session.program ctx with
+      | none =>
+        pure (session, .terminated)
+      | some nextCtx =>
+        let history := session.history.push nextCtx
+        let nextSession := { session with history, cursor := session.cursor + 1 }
+        if nextSession.atEnd then
+          pure (nextSession, .terminated)
+        else
+          pure (nextSession, .step)
 
 def stepBack (session : DebugSession) : DebugSession × StopReason :=
   let session := session.normalize
@@ -112,33 +124,34 @@ def stepBack (session : DebugSession) : DebugSession × StopReason :=
   else
     ({ session with cursor := session.cursor - 1 }, .step)
 
-def continueExecution (session : DebugSession) : DebugSession × StopReason :=
+def continueExecution (session : DebugSession) : Except EvalError (DebugSession × StopReason) := do
   let session := session.normalize
   if session.atEnd then
-    (session, .terminated)
+    pure (session, .terminated)
   else
-    let fuel := session.maxCursor - session.cursor + 1
-    let rec go : Nat → DebugSession → DebugSession × StopReason
+    let fuel := session.program.size + 1
+    let rec go : Nat → DebugSession → Except EvalError (DebugSession × StopReason)
       | 0, s =>
-        (s, .pause)
-      | fuel' + 1, s =>
-        let (s, reason) := s.next
+        pure (s, .pause)
+      | fuel' + 1, s => do
+        let (s, reason) ← s.next
         match reason with
         | .terminated =>
-          (s, .terminated)
+          pure (s, .terminated)
         | _ =>
           if s.hitBreakpoint then
-            (s, .breakpoint)
+            pure (s, .breakpoint)
           else
             go fuel' s
     go fuel session
 
-def initialStop (session : DebugSession) (stopOnEntry : Bool) : DebugSession × StopReason :=
+def initialStop (session : DebugSession) (stopOnEntry : Bool) :
+    Except EvalError (DebugSession × StopReason) := do
   let session := session.normalize
   if stopOnEntry then
-    (session, .entry)
+    pure (session, .entry)
   else if session.hitBreakpoint then
-    (session, .breakpoint)
+    pure (session, .breakpoint)
   else
     session.continueExecution
 

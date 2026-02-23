@@ -5,7 +5,7 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
-import Dap.DebugModel
+import Dap.DAP.Session
 
 open Lean
 
@@ -155,7 +155,7 @@ private def mkBreakpointView (programSize : Nat) (spans : Array StmtSpan) (line 
 
 private def currentFrameName (session : DebugSession) : String :=
   let pc := session.currentPc
-  match session.trace.program[pc]? with
+  match session.program[pc]? with
   | some stmt => toString stmt
   | none => "<terminated>"
 
@@ -177,7 +177,10 @@ def launchFromProgram
     | .error err => throw s!"Launch failed: {err}"
   let normalizedBreakpoints := normalizeRequestedBreakpoints program.size stmtSpans breakpoints
   let session := session.setBreakpoints normalizedBreakpoints
-  let (session, stopReason) := session.initialStop stopOnEntry
+  let (session, stopReason) ←
+    match session.initialStop stopOnEntry with
+    | .ok value => pure value
+    | .error err => throw s!"Launch failed: {err}"
   let sessionId := store.nextId
   let data : SessionData := { session, stmtSpans, status := statusFromStopReason stopReason }
   let store :=
@@ -197,7 +200,7 @@ def setBreakpoints
     (breakpoints : Array Nat) : Except String (SessionStore × SetBreakpointsResponse) := do
   let data ← getSessionData store sessionId
   ensureControllable data sessionId
-  let programSize := data.session.trace.program.size
+  let programSize := data.session.program.size
   let normalized := normalizeRequestedBreakpoints programSize data.stmtSpans breakpoints
   let data := { data with session := { data.session with breakpoints := normalized } }
   let store := putSessionData store sessionId data
@@ -210,10 +213,14 @@ def threads (_store : SessionStore) : ThreadsResponse :=
 private def applyControl
     (store : SessionStore)
     (sessionId : Nat)
-    (f : DebugSession → DebugSession × StopReason) : Except String (SessionStore × ControlResponse) := do
+    (f : DebugSession → Except EvalError (DebugSession × StopReason)) :
+    Except String (SessionStore × ControlResponse) := do
   let data ← getSessionData store sessionId
   ensureControllable data sessionId
-  let (session, reason) := f data.session
+  let (session, reason) ←
+    match f data.session with
+    | .ok value => pure value
+    | .error err => throw s!"Debug operation failed: {err}"
   let data := { data with session, status := statusFromStopReason reason }
   let store := putSessionData store sessionId data
   pure (store, mkControlResponse data reason)
@@ -222,7 +229,7 @@ def next (store : SessionStore) (sessionId : Nat) : Except String (SessionStore 
   applyControl store sessionId DebugSession.next
 
 def stepBack (store : SessionStore) (sessionId : Nat) : Except String (SessionStore × ControlResponse) :=
-  applyControl store sessionId DebugSession.stepBack
+  applyControl store sessionId (fun s => pure (DebugSession.stepBack s))
 
 def continueExecution (store : SessionStore) (sessionId : Nat) : Except String (SessionStore × ControlResponse) :=
   applyControl store sessionId DebugSession.continueExecution

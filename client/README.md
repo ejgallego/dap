@@ -31,7 +31,7 @@ Use debug type `lean-toy-dap`.
 
 Entry point:
 - If neither `program` nor `programFile` are provided, `entryPoint` defaults to `mainProgram`.
-- `entryPoint` is resolved as a Lean declaration name (supports both `Dap.ProgramInfo` and `Dap.Program`; unqualified names also try `Dap.Examples.<name>`).
+- `entryPoint` is resolved as a Lean declaration name (supports both `Dap.ProgramInfo` and `Dap.Program`; unqualified names also try `Dap.Lang.Examples.<name>`).
 
 Adapter executable:
 - `toydapPath` (optional): explicit path to the `toydap` binary.

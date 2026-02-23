@@ -5,7 +5,7 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
-import Dap.Syntax
+import Dap.Lang.Ast
 
 namespace Dap
 
