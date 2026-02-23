@@ -39,8 +39,21 @@ class LeanToyDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory
 }
 
 class LeanToyDebugConfigurationProvider implements vscode.DebugConfigurationProvider {
+    constructor(
+        private readonly extensionPath: string,
+        private readonly output: vscode.OutputChannel,
+    ) {}
+
+    private tryLoadJson(filePath: string): unknown | undefined {
+        if (!fs.existsSync(filePath)) {
+            return undefined
+        }
+        const raw = fs.readFileSync(filePath, 'utf8')
+        return JSON.parse(raw)
+    }
+
     resolveDebugConfiguration(
-        _folder: vscode.WorkspaceFolder | undefined,
+        folder: vscode.WorkspaceFolder | undefined,
         config: vscode.DebugConfiguration,
     ): vscode.ProviderResult<vscode.DebugConfiguration> {
         if (!config.type) {
@@ -58,8 +71,42 @@ class LeanToyDebugConfigurationProvider implements vscode.DebugConfigurationProv
                 config.source = active.fsPath
             }
         }
-        if (!config.entryPoint) {
-            config.entryPoint = 'mainProgram'
+        if (!config.programInfo) {
+            const workspaceRoot = folder?.uri.fsPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+            const generatedPath = workspaceRoot
+                ? path.join(workspaceRoot, '.dap', 'programInfo.generated.json')
+                : undefined
+            if (generatedPath) {
+                try {
+                    const loaded = this.tryLoadJson(generatedPath)
+                    if (loaded !== undefined) {
+                        config.programInfo = loaded
+                        this.output.appendLine(`[lean-toy-dap] launch.programInfo loaded from ${generatedPath}`)
+                    }
+                } catch (err) {
+                    vscode.window.showErrorMessage(`lean-toy-dap: invalid JSON in ${generatedPath}`)
+                    return null
+                }
+            }
+        }
+        if (!config.programInfo) {
+            const samplePath = path.join(this.extensionPath, 'programInfo.sample.json')
+            try {
+                const loaded = this.tryLoadJson(samplePath)
+                if (loaded !== undefined) {
+                    config.programInfo = loaded
+                    this.output.appendLine(`[lean-toy-dap] launch.programInfo loaded from ${samplePath}`)
+                }
+            } catch (_err) {
+                vscode.window.showErrorMessage(`lean-toy-dap: invalid JSON in ${samplePath}`)
+                return null
+            }
+        }
+        if (!config.programInfo) {
+            vscode.window.showErrorMessage(
+                "lean-toy-dap launch requires 'programInfo'. Run `lake exe dap-export --decl mainProgram --out .dap/programInfo.generated.json` or set launch.programInfo.",
+            )
+            return null
         }
         return config
     }
@@ -68,7 +115,7 @@ class LeanToyDebugConfigurationProvider implements vscode.DebugConfigurationProv
 export function activate(context: vscode.ExtensionContext): void {
     const output = vscode.window.createOutputChannel('Lean Toy DAP')
 
-    const configProvider = new LeanToyDebugConfigurationProvider()
+    const configProvider = new LeanToyDebugConfigurationProvider(context.extensionPath, output)
     const adapterFactory = new LeanToyDebugAdapterFactory(output)
 
     context.subscriptions.push(

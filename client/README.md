@@ -29,14 +29,9 @@ Use debug type `lean-toy-dap`.
 `source`:
 - Optional source path shown in stack traces.
 
-Entry point:
-- If `entryPoint` is omitted, it defaults to `mainProgram`.
-- `entryPoint` resolves as a Lean declaration name and must evaluate to `Dap.ProgramInfo`.
-- Unqualified names also try `Main.<name>` and `Dap.Lang.Examples.<name>`.
-
-Alternative launch payloads:
-- `programInfo`: inline `Dap.ProgramInfo` JSON payload.
-- `programInfoFile`: path to JSON file containing `Dap.ProgramInfo`.
+Launch payload:
+- `programInfo`: `Dap.ProgramInfo` JSON payload.
+- If omitted, the extension tries `${workspaceFolder}/.dap/programInfo.generated.json`.
 
 Adapter executable:
 - `toydapPath` (optional): explicit path to the `toydap` binary.
@@ -51,12 +46,14 @@ Example:
   "request": "launch",
   "source": "${file}",
   "toydapPath": "${workspaceFolder}/.lake/build/bin/toydap",
-  "entryPoint": "mainProgram",
+  "programInfo": {
+    "...": "Dap.ProgramInfo JSON"
+  },
   "stopOnEntry": true
 }
 ```
 
-For JSON launch payloads, see `client/programInfo.sample.json`.
+For JSON payload shape, see `client/programInfo.sample.json`.
 You can also generate `ProgramInfo` JSON via:
 
 ```bash

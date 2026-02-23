@@ -8,7 +8,6 @@ import Lean
 import Lean.Data.Lsp.Communication
 import Dap.Debugger.Core
 import Dap.DAP.Launch
-import examples.Main
 
 open Lean
 
@@ -98,35 +97,18 @@ private def parseBreakpointLines (args : Json) : Array Nat :=
         if line > 0 then acc.push line else acc
       | none => acc
 
-private def programFromEntryPoint (entryPoint : String) : IO LaunchProgram := do
-  let sysroot ← Lean.findSysroot
-  Lean.initSearchPath sysroot [System.FilePath.mk ".lake/build/lib/lean"]
-  let env ← Dap.importProjectEnv
-  let opts : Options := {}
-  match Dap.resolveLaunchProgramFromEnv env entryPoint (moduleName? := some `Main) (opts := opts) with
-  | .ok launchProgram => pure launchProgram
-  | .error err => throw <| IO.userError err
-
-private def readLaunchProgramFile (path : String) : IO LaunchProgram := do
-  let raw ← IO.FS.readFile path
-  let json ← IO.ofExcept (Json.parse raw)
-  match Dap.decodeLaunchProgramJson json with
-  | .ok program => pure program
-  | .error err => throw <| IO.userError s!"{err} (from '{path}')"
-
-private def resolveLaunchProgram (args : Json) : IO LaunchProgram := do
-  if let some programInfoJson := (args.getObjVal? "programInfo").toOption then
-    match Dap.decodeProgramInfoJson programInfoJson with
-    | .ok programInfo =>
-      pure { programInfo }
-    | .error err =>
-      throw <| IO.userError err
-  else if let some programInfoFile := (args.getObjValAs? String "programInfoFile").toOption then
-    readLaunchProgramFile programInfoFile
-  else
-    let rawEntry := (args.getObjValAs? String "entryPoint").toOption.getD "mainProgram"
-    let entry := if rawEntry.trimAscii.toString = "" then "mainProgram" else rawEntry
-    programFromEntryPoint entry
+private def requireProgramInfo (args : Json) : IO ProgramInfo := do
+  let programInfoJson ←
+    match (args.getObjVal? "programInfo").toOption with
+    | some json => pure json
+    | none =>
+      throw <| IO.userError
+        "launch requires 'programInfo' (a Dap.ProgramInfo JSON payload)."
+  match Dap.decodeProgramInfoJson programInfoJson with
+  | .ok programInfo =>
+    pure programInfo
+  | .error err =>
+    throw <| IO.userError err
 
 private def sourceJson? (sourcePath? : Option String) : Option Json := do
   let sourcePath ← sourcePath?
@@ -160,7 +142,7 @@ private def handleLaunch (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)
     match req.arguments with
     | .obj _ => req.arguments
     | _ => Json.mkObj []
-  let launchProgram ← resolveLaunchProgram args
+  let programInfo ← requireProgramInfo args
   let stopOnEntry := (args.getObjValAs? Bool "stopOnEntry").toOption.getD true
   let sourcePath? := (args.getObjValAs? String "source").toOption
   let breakpoints := parseBreakpointLines args
@@ -168,7 +150,7 @@ private def handleLaunch (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)
   let activeBreakpoints := if breakpoints.isEmpty then pending else breakpoints
   let st ← stRef.get
   let (core, launch) ←
-    match Dap.launchFromProgramInfo st.core launchProgram.programInfo stopOnEntry activeBreakpoints with
+    match Dap.launchFromProgramInfo st.core programInfo stopOnEntry activeBreakpoints with
     | .ok value => pure value
     | .error err => throw <| IO.userError err
   stRef.modify fun st =>

@@ -14,6 +14,20 @@ namespace Dap.Tests
 private def mkProgram (mainBody : Array Stmt) (helpers : Array FuncDef := #[]) : Program :=
   { functions := #[{ name := Program.mainName, params := #[], body := mainBody }] ++ helpers }
 
+private def mkProgramInfo (program : Program) : ProgramInfo :=
+  let located :=
+    Id.run do
+      let mut acc : Array LocatedStmt := #[]
+      for fn in program.functions do
+        for i in [:fn.body.size] do
+          let stmt := fn.body[i]!
+          let stmtLine := i + 1
+          let span : StmtSpan :=
+            { startLine := stmtLine, startColumn := 0, endLine := stmtLine, endColumn := 0 }
+          acc := acc.push { func := fn.name, stmtLine, stmt, span }
+      pure acc
+  { program, located }
+
 def testRunProgram : IO Unit := do
   let program := mkProgram
     #[
@@ -169,12 +183,15 @@ def testWidgetProps : IO Unit := do
       Stmt.letConst "y" 8,
       Stmt.letBin "z" .div "y" "x"
     ]
-  match traceWidgetProps program with
+  let info := mkProgramInfo program
+  match traceWidgetProps info with
   | .error err =>
     throw <| IO.userError s!"testWidgetProps failed: {err}"
   | .ok props =>
-    assertEq "widget program length" props.program.size program.size
+    assertEq "widget program length" props.program.size program.totalStmtCount
     assertEq "widget states length" props.states.size (program.size + 1)
+    let firstState := (props.states[0]?).getD default
+    assertEq "widget first call stack depth" firstState.callStack.size firstState.callDepth
     assertEq "widget last pc" ((props.states[props.states.size - 1]?.map (·.pc)).getD 0) program.size
 
 def testDebugSessionContinueAndBreakpoints : IO Unit := do
