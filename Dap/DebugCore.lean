@@ -1,3 +1,9 @@
+/-
+Copyright (c) 2025 Lean FRO LLC. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Author: Emilio J. Gallego Arias
+-/
+
 import Lean
 import Dap.DebugModel
 
@@ -5,9 +11,20 @@ open Lean
 
 namespace Dap
 
+inductive SessionStatus where
+  | stopped
+  | terminated
+  deriving Repr, BEq, DecidableEq, Inhabited
+
+instance : ToString SessionStatus where
+  toString
+    | .stopped => "stopped"
+    | .terminated => "terminated"
+
 structure SessionData where
   session : DebugSession
   stmtSpans : Array StmtSpan := #[]
+  status : SessionStatus := .stopped
   deriving Repr
 
 structure SessionStore where
@@ -88,28 +105,17 @@ private def getSessionData (store : SessionStore) (sessionId : Nat) : Except Str
 private def putSessionData (store : SessionStore) (sessionId : Nat) (data : SessionData) : SessionStore :=
   { store with sessions := store.sessions.insert sessionId data }
 
-private def sourceLineToStmtLine? (spans : Array StmtSpan) (line : Nat) : Option Nat :=
-  if spans.isEmpty then
-    none
+private def statusFromStopReason (reason : StopReason) : SessionStatus :=
+  if reason = .terminated then
+    .terminated
   else
-    let rec go (idx : Nat) : Option Nat :=
-      if h : idx < spans.size then
-        let span := spans[idx]
-        if span.startLine ≤ line && line ≤ span.endLine then
-          some (idx + 1)
-        else
-          go (idx + 1)
-      else
-        none
-    go 0
+    .stopped
 
-private def stmtLineToSourceLine (spans : Array StmtSpan) (stmtLine : Nat) : Nat :=
-  if spans.isEmpty then
-    stmtLine
+private def ensureControllable (data : SessionData) (sessionId : Nat) : Except String Unit := do
+  if data.status = .terminated then
+    throw s!"Session {sessionId} is terminated"
   else
-    match spans[stmtLine - 1]? with
-    | some span => span.startLine
-    | none => stmtLine
+    pure ()
 
 private def normalizeRequestedBreakpoints
     (programSize : Nat) (spans : Array StmtSpan) (lines : Array Nat) : Array Nat :=
@@ -120,7 +126,7 @@ private def normalizeRequestedBreakpoints
         if spans.isEmpty then
           if DebugSession.isValidBreakpointLine programSize line then some line else none
         else
-          sourceLineToStmtLine? spans line
+          ProgramInfo.sourceLineToStmtLine? spans line
       match stmtLine? with
       | some stmtLine =>
         if !acc.contains stmtLine then
@@ -135,7 +141,7 @@ private def mkBreakpointView (programSize : Nat) (spans : Array StmtSpan) (line 
     if spans.isEmpty then
       if DebugSession.isValidBreakpointLine programSize line then some line else none
     else
-      sourceLineToStmtLine? spans line
+      ProgramInfo.sourceLineToStmtLine? spans line
   match stmtLine? with
   | some _ =>
     { line, verified := true }
@@ -155,7 +161,7 @@ private def currentFrameName (session : DebugSession) : String :=
 
 private def mkControlResponse (data : SessionData) (reason : StopReason) : ControlResponse :=
   let session := data.session
-  { line := stmtLineToSourceLine data.stmtSpans session.currentLine
+  { line := ProgramInfo.stmtLineToSourceLine data.stmtSpans session.currentLine
     stopReason := toString reason
     terminated := session.atEnd || reason = .terminated }
 
@@ -173,14 +179,14 @@ def launchFromProgram
   let session := session.setBreakpoints normalizedBreakpoints
   let (session, stopReason) := session.initialStop stopOnEntry
   let sessionId := store.nextId
-  let data : SessionData := { session, stmtSpans }
+  let data : SessionData := { session, stmtSpans, status := statusFromStopReason stopReason }
   let store :=
     { nextId := sessionId + 1
       sessions := store.sessions.insert sessionId data }
   let response : LaunchResponse :=
     { sessionId
       threadId := 1
-      line := stmtLineToSourceLine stmtSpans session.currentLine
+      line := ProgramInfo.stmtLineToSourceLine stmtSpans session.currentLine
       stopReason := toString stopReason
       terminated := session.atEnd || stopReason = .terminated }
   pure (store, response)
@@ -190,6 +196,7 @@ def setBreakpoints
     (sessionId : Nat)
     (breakpoints : Array Nat) : Except String (SessionStore × SetBreakpointsResponse) := do
   let data ← getSessionData store sessionId
+  ensureControllable data sessionId
   let programSize := data.session.trace.program.size
   let normalized := normalizeRequestedBreakpoints programSize data.stmtSpans breakpoints
   let data := { data with session := { data.session with breakpoints := normalized } }
@@ -205,8 +212,9 @@ private def applyControl
     (sessionId : Nat)
     (f : DebugSession → DebugSession × StopReason) : Except String (SessionStore × ControlResponse) := do
   let data ← getSessionData store sessionId
+  ensureControllable data sessionId
   let (session, reason) := f data.session
-  let data := { data with session }
+  let data := { data with session, status := statusFromStopReason reason }
   let store := putSessionData store sessionId data
   pure (store, mkControlResponse data reason)
 
@@ -221,6 +229,7 @@ def continueExecution (store : SessionStore) (sessionId : Nat) : Except String (
 
 def pause (store : SessionStore) (sessionId : Nat) : Except String ControlResponse := do
   let data ← getSessionData store sessionId
+  ensureControllable data sessionId
   pure (mkControlResponse data .pause)
 
 def stackTrace
@@ -229,11 +238,12 @@ def stackTrace
     (startFrame : Nat := 0)
     (levels : Nat := 20) : Except String StackTraceResponse := do
   let data ← getSessionData store sessionId
+  ensureControllable data sessionId
   let session := data.session
   let fullFrames :=
     #[{ id := 0
         name := currentFrameName session
-        line := stmtLineToSourceLine data.stmtSpans session.currentLine
+        line := ProgramInfo.stmtLineToSourceLine data.stmtSpans session.currentLine
         column := 1 : StackFrameView }]
   let frames :=
     if startFrame > 0 || levels = 0 then
@@ -245,7 +255,8 @@ def stackTrace
       totalFrames := fullFrames.size }
 
 def scopes (store : SessionStore) (sessionId : Nat) (frameId : Nat := 0) : Except String ScopesResponse := do
-  let _ ← getSessionData store sessionId
+  let data ← getSessionData store sessionId
+  ensureControllable data sessionId
   if frameId = 0 then
     pure { scopes := #[{ name := "locals", variablesReference := 1 }] }
   else
@@ -256,6 +267,7 @@ def variables
     (sessionId : Nat)
     (variablesReference : Nat) : Except String VariablesResponse := do
   let data ← getSessionData store sessionId
+  ensureControllable data sessionId
   if variablesReference != 1 then
     pure { variables := #[] }
   else

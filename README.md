@@ -89,6 +89,8 @@ They are designed to be called over Lean's `$/lean/rpc/call` transport.
 - define `mainProgram : Dap.Program`,
 - launch `lean-toy-dap` with `source = ${file}` and `entryPoint = "mainProgram"`.
 
+`entryPoint` resolves declarations dynamically (unqualified names also try `Dap.Examples.<name>`). The declaration may be either `Dap.Program` or `Dap.ProgramInfo`.
+
 ## Infotree metadata
 
 When elaborating `dap%[...]` or `dapInfo%[...]`, the elaborator stores custom infotree nodes carrying the statement-location payload.
@@ -124,5 +126,7 @@ Use `dap-export` to generate source-aware JSON from a Lean declaration:
 ```bash
 lake exe dap-export --decl Dap.Examples.mainProgramInfo --out .dap/programInfo.generated.json
 ```
+
+`--decl` also accepts `Dap.Program` declarations; these are exported as `ProgramInfo` with empty `located` spans.
 
 The repository `.vscode/launch.json` includes a config that runs this command as a `preLaunchTask`.

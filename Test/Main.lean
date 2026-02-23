@@ -1,3 +1,9 @@
+/-
+Copyright (c) 2025 Lean FRO LLC. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Author: Emilio J. Gallego Arias
+-/
+
 import Dap
 
 open Dap
@@ -165,6 +171,10 @@ def testDslProgramInfo : IO Unit := do
   assertSomeEq "line maps to first stmt" (info.lineToStmtIdx? line0) 0
   assertTrue "statement spans have valid line range"
     (info.located.all fun located => located.span.startLine ≤ located.span.endLine)
+  let firstStmtLine := (ProgramInfo.sourceLineToStmtLine? info.stmtSpans line0).getD 0
+  assertEq "source->stmt line mapping" firstStmtLine 1
+  let firstSourceLine := ProgramInfo.stmtLineToSourceLine info.stmtSpans 1
+  assertEq "stmt->source line mapping" firstSourceLine line0
 
 private def expectCore (label : String) (result : Except String α) : IO α := do
   match result with
@@ -199,6 +209,27 @@ def testDebugCoreFlow : IO Unit := do
   | .error _ =>
     pure ()
 
+def testDebugCoreTerminatedGuards : IO Unit := do
+  let program : Program := dap%[
+    let x := 1
+  ]
+  let store0 : SessionStore := {}
+  let (store1, launch) ← expectCore "terminated guards launch" <| Dap.launchFromProgram store0 program false #[]
+  assertEq "terminated guards launch terminated" launch.terminated true
+  let sessionId := launch.sessionId
+  let nextAfterTerminated := Dap.next store1 sessionId
+  let setBpAfterTerminated := Dap.setBreakpoints store1 sessionId #[1]
+  match nextAfterTerminated with
+  | .ok _ =>
+    throw <| IO.userError "next should fail on terminated session"
+  | .error err =>
+    assertTrue "next terminated error mentions state" (err.contains "terminated")
+  match setBpAfterTerminated with
+  | .ok _ =>
+    throw <| IO.userError "setBreakpoints should fail on terminated session"
+  | .error err =>
+    assertTrue "setBreakpoints terminated error mentions state" (err.contains "terminated")
+
 private def encodeDapRequest (seq : Nat) (command : String) (arguments : Json := Json.mkObj []) : String :=
   let payload := Json.mkObj
     [ ("seq", toJson seq),
@@ -207,6 +238,28 @@ private def encodeDapRequest (seq : Nat) (command : String) (arguments : Json :=
       ("arguments", arguments) ]
   let data := Lean.Json.compress payload
   s!"Content-Length: {String.utf8ByteSize data}\r\n\r\n{data}"
+
+private def runToyDapPayload (name : String) (stdinPayload : String) : IO String := do
+  let inputPath := s!".dap/{name}.stdin"
+  IO.FS.createDirAll ".dap"
+  IO.FS.writeFile inputPath stdinPayload
+  let out ← IO.Process.output
+    { cmd := "bash"
+      args := #["-lc", s!".lake/build/bin/toydap < {inputPath}"] }
+  try
+    IO.FS.removeFile inputPath
+  catch _ =>
+    pure ()
+  assertEq s!"toydap ({name}) exits cleanly" out.exitCode 0
+  pure out.stdout
+
+private def appearsBefore (s first second : String) : Bool :=
+  match s.splitOn first with
+  | [] =>
+    false
+  | _ :: tail =>
+    let afterFirst := String.intercalate first tail
+    afterFirst.contains second
 
 def testToyDapProtocolSanity : IO Unit := do
   let stdinPayload :=
@@ -218,32 +271,64 @@ def testToyDapProtocolSanity : IO Unit := do
         encodeDapRequest 3 "threads",
         encodeDapRequest 4 "next",
         encodeDapRequest 5 "disconnect" ]
-  let inputPath := ".dap/toydap.sanity.stdin"
-  IO.FS.createDirAll ".dap"
-  IO.FS.writeFile inputPath stdinPayload
-  let out ← IO.Process.output
-    { cmd := "bash"
-      args := #["-lc", s!".lake/build/bin/toydap < {inputPath}"] }
-  try
-    IO.FS.removeFile inputPath
-  catch _ =>
-    pure ()
-  assertEq "toydap exits cleanly" out.exitCode 0
-  let stdout := out.stdout
+  let stdout ← runToyDapPayload "toydap.sanity" stdinPayload
   assertTrue "initialize response present"
     (stdout.contains "\"request_seq\":1" && stdout.contains "\"command\":\"initialize\"")
   assertTrue "initialized event present"
     (stdout.contains "\"event\":\"initialized\"")
   assertTrue "launch response present"
     (stdout.contains "\"request_seq\":2" && stdout.contains "\"command\":\"launch\"")
-  assertTrue "stopped event present"
-    (stdout.contains "\"event\":\"stopped\"")
   assertTrue "threads response present"
     (stdout.contains "\"request_seq\":3" && stdout.contains "\"command\":\"threads\"")
   assertTrue "next response present"
     (stdout.contains "\"request_seq\":4" && stdout.contains "\"command\":\"next\"")
   assertTrue "disconnect response present"
     (stdout.contains "\"request_seq\":5" && stdout.contains "\"command\":\"disconnect\"")
+
+def testToyDapBreakpointProtocol : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "setBreakpoints" <| Json.mkObj
+          [ ("breakpoints", Json.arr #[Json.mkObj [("line", toJson (3 : Nat))]]) ],
+        encodeDapRequest 3 "launch" <| Json.mkObj
+          [ ("entryPoint", toJson "mainProgram"),
+            ("stopOnEntry", toJson false) ],
+        encodeDapRequest 4 "disconnect" ]
+  let stdout ← runToyDapPayload "toydap.breakpoint" stdinPayload
+  assertTrue "setBreakpoints response present"
+    (stdout.contains "\"request_seq\":2" && stdout.contains "\"command\":\"setBreakpoints\"")
+  assertTrue "breakpoint marked verified"
+    (stdout.contains "\"verified\":true")
+  assertTrue "launch response present in breakpoint flow"
+    (stdout.contains "\"request_seq\":3" && stdout.contains "\"command\":\"launch\"")
+  if stdout.contains "\"event\":\"stopped\"" && stdout.contains "\"reason\":\"breakpoint\"" then
+    pure ()
+  else
+    throw <| IO.userError s!"breakpoint stop reason missing in output: {stdout}"
+
+def testToyDapContinueEventOrder : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "launch" <| Json.mkObj
+          [ ("entryPoint", toJson "mainProgram"),
+            ("stopOnEntry", toJson true) ],
+        encodeDapRequest 3 "continue",
+        encodeDapRequest 4 "disconnect" ]
+  let stdout ← runToyDapPayload "toydap.continue" stdinPayload
+  let continuedMarker := "\"event\":\"continued\""
+  let continueRespMarker := "\"request_seq\":3"
+  assertTrue "continued event is emitted" (stdout.contains continuedMarker)
+  assertTrue "continue response is emitted" (stdout.contains continueRespMarker)
+  let hasStopOrTerm :=
+    stdout.contains "\"event\":\"stopped\"" || stdout.contains "\"event\":\"terminated\""
+  assertTrue "post-continue stop/terminate event is emitted" hasStopOrTerm
+  assertTrue "continued precedes continue response"
+    (appearsBefore stdout continuedMarker continueRespMarker)
+  assertTrue "stop/terminate follows continue response"
+    (appearsBefore stdout continueRespMarker "\"event\":\"stopped\"" ||
+      appearsBefore stdout continueRespMarker "\"event\":\"terminated\"")
 
 end Dap.Tests
 
@@ -258,5 +343,8 @@ def main : IO Unit := do
   Dap.Tests.testDslProgram
   Dap.Tests.testDslProgramInfo
   Dap.Tests.testDebugCoreFlow
+  Dap.Tests.testDebugCoreTerminatedGuards
   Dap.Tests.testToyDapProtocolSanity
+  Dap.Tests.testToyDapBreakpointProtocol
+  Dap.Tests.testToyDapContinueEventOrder
   IO.println "All tests passed."

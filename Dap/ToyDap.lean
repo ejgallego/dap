@@ -1,3 +1,9 @@
+/-
+Copyright (c) 2025 Lean FRO LLC. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Author: Emilio J. Gallego Arias
+-/
+
 import Lean
 import Lean.Data.Lsp.Communication
 import Dap.DebugCore
@@ -98,14 +104,57 @@ private def parseBreakpointLines (args : Json) : Array Nat :=
 private def spansFromProgramInfo (programInfo : ProgramInfo) : Array StmtSpan :=
   programInfo.located.map (·.span)
 
-private def programFromEntryPoint? (entryPoint : String) : Option LaunchProgram :=
-  let entryPoint := entryPoint.trimAscii.toString
-  match entryPoint with
-  | "mainProgram" | "sampleProgram"
-  | "Dap.Examples.mainProgram" | "Dap.Examples.sampleProgram" =>
-    let info := Dap.Examples.sampleProgramInfo
-    some { program := info.program, stmtSpans := spansFromProgramInfo info }
-  | _ => none
+private def parseDeclName? (raw : String) : Option Name :=
+  let parts := raw.trimAscii.toString.splitOn "." |>.filter (· != "")
+  match parts with
+  | [] => none
+  | _ =>
+    some <| parts.foldl Name.str Name.anonymous
+
+private def isUnqualifiedName (n : Name) : Bool :=
+  match n with
+  | .str .anonymous _ => true
+  | .num .anonymous _ => true
+  | _ => false
+
+private def candidateDeclNames (decl : Name) : Array Name :=
+  if isUnqualifiedName decl then
+    #[decl, `Dap.Examples ++ decl]
+  else
+    #[decl]
+
+private unsafe def evalLaunchProgramFromDecl
+    (env : Environment) (opts : Options) (decl : Name) : Except String LaunchProgram := do
+  match env.evalConstCheck ProgramInfo opts ``Dap.ProgramInfo decl with
+  | .ok programInfo =>
+    pure { program := programInfo.program, stmtSpans := spansFromProgramInfo programInfo }
+  | .error infoErr =>
+    match env.evalConstCheck Program opts ``Dap.Program decl with
+    | .ok program =>
+      pure { program, stmtSpans := #[] }
+    | .error programErr =>
+      throw s!"Declaration '{decl}' is neither Dap.ProgramInfo nor Dap.Program.\nProgramInfo error: {infoErr}\nProgram error: {programErr}"
+
+private def programFromEntryPoint (entryPoint : String) : IO LaunchProgram := do
+  let sysroot ← Lean.findSysroot
+  Lean.initSearchPath sysroot [System.FilePath.mk ".lake/build/lib/lean"]
+  let declName ←
+    match parseDeclName? entryPoint with
+    | some n => pure n
+    | none => throw <| IO.userError s!"Invalid entryPoint '{entryPoint}'"
+  let env ← importModules #[`Dap.Examples] {}
+  let opts : Options := {}
+  let candidates := candidateDeclNames declName
+  let resolved? := candidates.find? env.contains
+  let resolved ←
+    match resolved? with
+    | some n => pure n
+    | none =>
+      let attempted := String.intercalate ", " <| candidates.toList.map (fun n => s!"'{n}'")
+      throw <| IO.userError s!"Could not resolve entryPoint '{entryPoint}'. Tried: {attempted}"
+  match unsafe evalLaunchProgramFromDecl env opts resolved with
+  | .ok launchProgram => pure launchProgram
+  | .error err => throw <| IO.userError err
 
 private def decodeProgram (json : Json) : Except String Program :=
   match fromJson? json with
@@ -152,11 +201,7 @@ private def resolveLaunchProgram (args : Json) : IO LaunchProgram := do
   else
     let rawEntry := (args.getObjValAs? String "entryPoint").toOption.getD "mainProgram"
     let entry := if rawEntry.trimAscii.toString = "" then "mainProgram" else rawEntry
-    match programFromEntryPoint? entry with
-    | some program => pure program
-    | none =>
-      throw <| IO.userError
-        s!"Unsupported entryPoint '{entry}' in standalone mode. Provide 'program', 'programFile', 'programInfo', or 'programInfoFile'."
+    programFromEntryPoint entry
 
 private def sourceJson? (sourcePath? : Option String) : Option Json := do
   let sourcePath ← sourcePath?

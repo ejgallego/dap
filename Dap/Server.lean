@@ -1,3 +1,9 @@
+/-
+Copyright (c) 2025 Lean FRO LLC. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Author: Emilio J. Gallego Arias
+-/
+
 import Lean
 import Dap.DebugCore
 
@@ -184,6 +190,42 @@ private def decodeStmtExpr? (e : Expr) : Lean.MetaM (Option Stmt) := do
       pure none
   | _ => pure none
 
+private def decodeStmtSpanExpr? (e : Expr) : Lean.MetaM (Option StmtSpan) := do
+  let e ← Lean.Meta.whnf e
+  let args := e.getAppArgs
+  match e.getAppFn with
+  | .const ``Dap.StmtSpan.mk _ =>
+    if h : args.size = 4 then
+      let startLine? := natLit? args[0]
+      let startColumn? := natLit? args[1]
+      let endLine? := natLit? args[2]
+      let endColumn? := natLit? args[3]
+      pure <| do
+        let startLine ← startLine?
+        let startColumn ← startColumn?
+        let endLine ← endLine?
+        let endColumn ← endColumn?
+        pure { startLine, startColumn, endLine, endColumn }
+    else
+      pure none
+  | _ => pure none
+
+private def decodeLocatedStmtExpr? (e : Expr) : Lean.MetaM (Option LocatedStmt) := do
+  let e ← Lean.Meta.whnf e
+  let args := e.getAppArgs
+  match e.getAppFn with
+  | .const ``Dap.LocatedStmt.mk _ =>
+    if h : args.size = 2 then
+      let stmt? ← decodeStmtExpr? args[0]
+      let span? ← decodeStmtSpanExpr? args[1]
+      pure <| do
+        let stmt ← stmt?
+        let span ← span?
+        pure { stmt, span }
+    else
+      pure none
+  | _ => pure none
+
 private def decodeStmtListExprAux? (fuel : Nat) (e : Expr) : Lean.MetaM (Option (List Stmt)) := do
   if fuel = 0 then
     pure none
@@ -209,6 +251,32 @@ private def decodeStmtListExprAux? (fuel : Nat) (e : Expr) : Lean.MetaM (Option 
 private def decodeStmtListExpr? (e : Expr) : Lean.MetaM (Option (List Stmt)) :=
   decodeStmtListExprAux? 100000 e
 
+private def decodeLocatedStmtListExprAux? (fuel : Nat) (e : Expr) :
+    Lean.MetaM (Option (List LocatedStmt)) := do
+  if fuel = 0 then
+    pure none
+  else
+    let e ← Lean.Meta.whnf e
+    let args := e.getAppArgs
+    match e.getAppFn with
+    | .const ``List.nil _ =>
+      pure (some [])
+    | .const ``List.cons _ =>
+      if h : args.size = 3 then
+        let head? ← decodeLocatedStmtExpr? args[1]
+        let tail? ← decodeLocatedStmtListExprAux? (fuel - 1) args[2]
+        pure <| do
+          let head ← head?
+          let tail ← tail?
+          pure (head :: tail)
+      else
+        pure none
+    | _ =>
+      pure none
+
+private def decodeLocatedStmtListExpr? (e : Expr) : Lean.MetaM (Option (List LocatedStmt)) :=
+  decodeLocatedStmtListExprAux? 100000 e
+
 private def decodeProgramExpr? (e : Expr) : Lean.MetaM (Option Program) := do
   let e ← Lean.Meta.whnf e
   let args := e.getAppArgs
@@ -226,12 +294,48 @@ private def decodeProgramExpr? (e : Expr) : Lean.MetaM (Option Program) := do
   | _ =>
     pure none
 
+private def decodeLocatedStmtArrayExpr? (e : Expr) : Lean.MetaM (Option (Array LocatedStmt)) := do
+  let e ← Lean.Meta.whnf e
+  let args := e.getAppArgs
+  match e.getAppFn with
+  | .const ``Array.mk _ =>
+    if h : args.size = 2 then
+      return (← decodeLocatedStmtListExpr? args[1]).map List.toArray
+    else
+      pure none
+  | .const ``List.toArray _ =>
+    if h : args.size = 2 then
+      return (← decodeLocatedStmtListExpr? args[1]).map List.toArray
+    else
+      pure none
+  | _ =>
+    pure none
+
+private def decodeProgramInfoExpr? (e : Expr) : Lean.MetaM (Option ProgramInfo) := do
+  let e ← Lean.Meta.whnf e
+  let args := e.getAppArgs
+  match e.getAppFn with
+  | .const ``Dap.ProgramInfo.mk _ =>
+    if h : args.size = 2 then
+      let program? ← decodeProgramExpr? args[0]
+      let located? ← decodeLocatedStmtArrayExpr? args[1]
+      pure <| do
+        let program ← program?
+        let located ← located?
+        pure { program, located }
+    else
+      pure none
+  | _ =>
+    pure none
+
 private def launchFromProgram
     (program : Program)
     (stopOnEntry : Bool)
-    (breakpoints : Array Nat) : RequestM LaunchResponse := do
+    (breakpoints : Array Nat)
+    (stmtSpans : Array StmtSpan := #[]) : RequestM LaunchResponse := do
   let store ← dapSessionStoreRef.get
-  let (store, response) ← runCoreResult <| Dap.launchFromProgram store program stopOnEntry breakpoints
+  let (store, response) ← runCoreResult <|
+    Dap.launchFromProgram store program stopOnEntry breakpoints stmtSpans
   updateStore store
   pure response
 
@@ -265,15 +369,22 @@ def dapLaunchMain (params : LaunchMainParams) : RequestM (RequestTask LaunchResp
         let attempted := String.intercalate ", " <| candidates.toList.map (fun n => s!"'{n}'")
         throw <| mkInvalidParams
           s!"Could not resolve entry point '{params.entryPoint}'. Tried: {attempted}"
-    let program ←
-      match ← RequestM.runTermElabM snap do
-        decodeProgramExpr? (mkConst resolvedName)
-      with
-      | some program => pure program
-      | none =>
-        throw <| mkInvalidParams
-          s!"Could not decode '{resolvedName}' as Dap.Program at {lspPos}"
-    launchFromProgram program params.stopOnEntry params.breakpoints
+    let programInfo? ←
+      RequestM.runTermElabM snap do
+        decodeProgramInfoExpr? (mkConst resolvedName)
+    match programInfo? with
+    | some info =>
+      launchFromProgram info.program params.stopOnEntry params.breakpoints info.stmtSpans
+    | none =>
+      let program ←
+        match ← RequestM.runTermElabM snap do
+          decodeProgramExpr? (mkConst resolvedName)
+        with
+        | some program => pure program
+        | none =>
+          throw <| mkInvalidParams
+            s!"Could not decode '{resolvedName}' as Dap.ProgramInfo or Dap.Program at {lspPos}"
+      launchFromProgram program params.stopOnEntry params.breakpoints
 
 @[server_rpc_method]
 def dapSetBreakpoints (params : SetBreakpointsParams) :

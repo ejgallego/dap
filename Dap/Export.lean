@@ -1,3 +1,11 @@
+/-
+Copyright (c) 2025 Lean FRO LLC. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Author: Emilio J. Gallego Arias
+-/
+
+import Lean
+import Dap.Syntax
 import Dap.Examples
 
 open Lean
@@ -5,7 +13,7 @@ open Lean
 namespace Dap.Export
 
 structure CliOptions where
-  decl : String := "Dap.Examples.mainProgramInfo"
+  decl : String := "mainProgram"
   out : System.FilePath := System.FilePath.mk ".dap/programInfo.generated.json"
   pretty : Bool := true
   deriving Inhabited
@@ -13,13 +21,16 @@ structure CliOptions where
 def usage : String := String.intercalate "\n"
   [ "Usage: lake exe dap-export [--decl <name>] [--out <path>] [--compact]",
     "",
-    "Export a source-aware DAP program payload (`Dap.ProgramInfo`) to JSON.",
+    "Export a DAP payload from a Lean declaration.",
     "",
-    "Supported --decl values:",
-    "  Dap.Examples.mainProgramInfo (default)",
-    "  Dap.Examples.sampleProgramInfo",
-    "  mainProgramInfo",
-    "  sampleProgramInfo" ]
+    "--decl may point to either:",
+    "  - Dap.ProgramInfo (preferred, preserves spans), or",
+    "  - Dap.Program (exported as ProgramInfo with empty `located`).",
+    "",
+    "Default: --decl mainProgram",
+    "Name resolution for unqualified names tries:",
+    "  1) <name>",
+    "  2) Dap.Examples.<name>" ]
 
 private def parseArgs : CliOptions → List String → Except String CliOptions
   | opts, [] =>
@@ -42,15 +53,57 @@ private def parseArgs : CliOptions → List String → Except String CliOptions
 private def normalizeDeclName (raw : String) : String :=
   raw.trimAscii.toString
 
-private def resolveProgramInfo (rawDecl : String) : Except String ProgramInfo := do
-  let decl := normalizeDeclName rawDecl
-  match decl with
-  | "Dap.Examples.mainProgramInfo" | "mainProgramInfo" =>
-    pure Dap.Examples.mainProgramInfo
-  | "Dap.Examples.sampleProgramInfo" | "sampleProgramInfo" =>
-    pure Dap.Examples.sampleProgramInfo
+private def parseDeclName? (raw : String) : Option Name :=
+  let parts := raw.trimAscii.toString.splitOn "." |>.filter (· != "")
+  match parts with
+  | [] => none
   | _ =>
-    throw s!"Unsupported --decl '{rawDecl}'.\n\n{usage}"
+    some <| parts.foldl Name.str Name.anonymous
+
+private def isUnqualifiedName (n : Name) : Bool :=
+  match n with
+  | .str .anonymous _ => true
+  | .num .anonymous _ => true
+  | _ => false
+
+private def candidateDeclNames (decl : Name) : Array Name :=
+  if isUnqualifiedName decl then
+    #[decl, `Dap.Examples ++ decl]
+  else
+    #[decl]
+
+private unsafe def evalProgramInfoOrProgram
+    (env : Environment) (opts : Options) (decl : Name) : Except String ProgramInfo := do
+  match env.evalConstCheck ProgramInfo opts ``Dap.ProgramInfo decl with
+  | .ok info =>
+    pure info
+  | .error infoErr =>
+    match env.evalConstCheck Program opts ``Dap.Program decl with
+    | .ok program =>
+      pure { program, located := #[] }
+    | .error programErr =>
+      throw s!"Declaration '{decl}' is neither Dap.ProgramInfo nor Dap.Program.\nProgramInfo error: {infoErr}\nProgram error: {programErr}"
+
+private def loadProgramInfoFromDecl (rawDecl : String) : IO ProgramInfo := do
+  let sysroot ← Lean.findSysroot
+  Lean.initSearchPath sysroot [System.FilePath.mk ".lake/build/lib/lean"]
+  let declName ←
+    match parseDeclName? rawDecl with
+    | some n => pure n
+    | none => throw <| IO.userError s!"Invalid declaration name '{rawDecl}'"
+  let env ← importModules #[`Dap.Examples] {}
+  let opts : Options := {}
+  let candidates := candidateDeclNames declName
+  let resolved? := candidates.find? env.contains
+  let resolved ←
+    match resolved? with
+    | some n => pure n
+    | none =>
+      let attempted := String.intercalate ", " <| candidates.toList.map (fun n => s!"'{n}'")
+      throw <| IO.userError s!"Could not resolve declaration '{rawDecl}'. Tried: {attempted}"
+  match unsafe evalProgramInfoOrProgram env opts resolved with
+  | .ok info => pure info
+  | .error err => throw <| IO.userError err
 
 private def renderJson (programInfo : ProgramInfo) (pretty : Bool) : String :=
   let json := toJson programInfo
@@ -72,10 +125,7 @@ def run (args : List String) : IO Unit := do
     match parseArgs default args with
     | .ok opts => pure opts
     | .error err => throw <| IO.userError err
-  let programInfo ←
-    match resolveProgramInfo opts.decl with
-    | .ok info => pure info
-    | .error err => throw <| IO.userError err
+  let programInfo ← loadProgramInfoFromDecl opts.decl
   let content := renderJson programInfo opts.pretty
   writeJsonFile opts.out content
   IO.println s!"Wrote {opts.out} from {normalizeDeclName opts.decl}"

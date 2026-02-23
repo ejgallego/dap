@@ -1,3 +1,9 @@
+/-
+Copyright (c) 2025 Lean FRO LLC. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Author: Emilio J. Gallego Arias
+-/
+
 import Lean
 
 open Lean
@@ -92,17 +98,31 @@ namespace ProgramInfo
 def stmtSpans (info : ProgramInfo) : Array StmtSpan :=
   info.located.map (·.span)
 
-def lineToStmtIdx? (info : ProgramInfo) (line : Nat) : Option Nat :=
-  let rec go (idx : Nat) : Option Nat :=
-    if h : idx < info.located.size then
-      let located := info.located[idx]
-      if located.span.startLine ≤ line && line ≤ located.span.endLine then
-        some idx
+def sourceLineToStmtLine? (spans : Array StmtSpan) (line : Nat) : Option Nat :=
+  if spans.isEmpty then
+    none
+  else
+    let rec go (idx : Nat) : Option Nat :=
+      if h : idx < spans.size then
+        let span := spans[idx]
+        if span.startLine ≤ line && line ≤ span.endLine then
+          some (idx + 1)
+        else
+          go (idx + 1)
       else
-        go (idx + 1)
-    else
-      none
-  go 0
+        none
+    go 0
+
+def stmtLineToSourceLine (spans : Array StmtSpan) (stmtLine : Nat) : Nat :=
+  if spans.isEmpty then
+    stmtLine
+  else
+    match spans[stmtLine - 1]? with
+    | some span => span.startLine
+    | none => stmtLine
+
+def lineToStmtIdx? (info : ProgramInfo) (line : Nat) : Option Nat :=
+  (sourceLineToStmtLine? info.stmtSpans line).map (· - 1)
 
 end ProgramInfo
 
