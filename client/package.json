@@ -23,12 +23,21 @@
         "title": "Lean Toy DAP: Start Debugging"
       }
     ],
+    "breakpoints": [
+      {
+        "language": "lean"
+      },
+      {
+        "language": "lean4"
+      }
+    ],
     "debuggers": [
       {
         "type": "lean-toy-dap",
         "label": "Lean Toy DAP",
         "languages": [
-          "lean"
+          "lean",
+          "lean4"
         ],
         "configurationAttributes": {
           "launch": {

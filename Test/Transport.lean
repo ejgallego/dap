@@ -92,6 +92,26 @@ def testToyDapBreakpointProtocol : IO Unit := do
   else
     throw <| IO.userError s!"breakpoint stop reason missing in output: {stdout}"
 
+def testToyDapBreakpointProtocolWithLinesField : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "setBreakpoints" <| Json.mkObj
+          [ ("lines", Json.arr #[toJson (22 : Nat)]) ],
+        encodeDapRequest 3 "launch" <| launchArgs false,
+        encodeDapRequest 4 "disconnect" ]
+  let stdout ← runToyDapPayload "toydap.breakpoint.lines-field" stdinPayload
+  assertTrue "setBreakpoints(lines) response present"
+    (stdout.contains "\"request_seq\":2" && stdout.contains "\"command\":\"setBreakpoints\"")
+  assertTrue "setBreakpoints(lines) is accepted pre-launch"
+    (stdout.contains "\"verified\":false")
+  assertTrue "launch response present in lines-field breakpoint flow"
+    (stdout.contains "\"request_seq\":3" && stdout.contains "\"command\":\"launch\"")
+  if stdout.contains "\"event\":\"stopped\"" && stdout.contains "\"reason\":\"breakpoint\"" then
+    pure ()
+  else
+    throw <| IO.userError s!"breakpoint stop reason missing in lines-field output: {stdout}"
+
 def testToyDapContinueEventOrder : IO Unit := do
   let stdinPayload :=
     String.intercalate ""
@@ -212,6 +232,7 @@ def testToyDapLaunchTerminatesOrder : IO Unit := do
 def runTransportTests : IO Unit := do
   testToyDapProtocolSanity
   testToyDapBreakpointProtocol
+  testToyDapBreakpointProtocolWithLinesField
   testToyDapContinueEventOrder
   testToyDapStepInOutProtocol
   testToyDapNextStepsOverCall

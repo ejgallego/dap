@@ -32,6 +32,7 @@ Use debug type `lean-toy-dap`.
 Launch payload:
 - `programInfo`: `Dap.ProgramInfo` JSON payload.
 - If omitted, the extension tries `${workspaceFolder}/.dap/programInfo.generated.json`.
+- The extension does not auto-load `client/programInfo.sample.json`; that file is only a reference shape.
 
 Adapter executable:
 - `toydapPath` (optional): explicit path to the `toydap` binary.
@@ -82,4 +83,5 @@ Handled by `toydap`:
 ## Notes
 
 - Breakpoints are line-based and resolved through function-aware `ProgramInfo` locations.
+- `setBreakpoints` accepts both `breakpoints[*].line` and legacy `lines[]` payloads.
 - Variables are exposed as a `locals` scope per selected stack frame.
