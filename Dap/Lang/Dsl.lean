@@ -15,6 +15,7 @@ namespace Dap
 
 declare_syntax_cat dap_rhs
 declare_syntax_cat dap_stmt
+declare_syntax_cat dap_func
 
 syntax num : dap_rhs
 syntax "-" num : dap_rhs
@@ -22,22 +23,18 @@ syntax "add" ident ident : dap_rhs
 syntax "sub" ident ident : dap_rhs
 syntax "mul" ident ident : dap_rhs
 syntax "div" ident ident : dap_rhs
+syntax "call" ident "(" ident,* ")" : dap_rhs
 
 syntax "let " ident " := " dap_rhs : dap_stmt
+syntax "return " ident : dap_stmt
+
+syntax "def " ident "(" ident,* ")" " := " "{" dap_stmt,* "}" : dap_func
 
 /--
 Program literal syntax for the toy language.
-
-Example:
-```
-def p : Dap.ProgramInfo := dap%[
-  let x := 1,
-  let y := 2,
-  let z := add x y
-]
-```
+`dap%[...]` must contain only function definitions and include `main()` as entrypoint.
 -/
-syntax (name := dapProgramTerm) "dap%[" dap_stmt,* "]" : term
+syntax (name := dapProgramTerm) "dap%[" dap_func,* "]" : term
 
 /--
 Convenience command macro to define a program declaration from DSL syntax.
@@ -70,23 +67,32 @@ private def parseNatLiteral (numStx : TSyntax `num) : TermElabM Nat :=
   | none =>
     throwErrorAt numStx "expected a natural number literal"
 
-private def parseStmt : Syntax → TermElabM Stmt
-  | `(dap_stmt| let $dest:ident := $n:num) => do
-    let value := Int.ofNat (← parseNatLiteral n)
-    pure (Stmt.letConst (varOfIdent dest) value)
-  | `(dap_stmt| let $dest:ident := - $n:num) => do
-    let value := -(Int.ofNat (← parseNatLiteral n))
-    pure (Stmt.letConst (varOfIdent dest) value)
-  | `(dap_stmt| let $dest:ident := add $lhs:ident $rhs:ident) =>
-    pure (Stmt.letBin (varOfIdent dest) .add (varOfIdent lhs) (varOfIdent rhs))
-  | `(dap_stmt| let $dest:ident := sub $lhs:ident $rhs:ident) =>
-    pure (Stmt.letBin (varOfIdent dest) .sub (varOfIdent lhs) (varOfIdent rhs))
-  | `(dap_stmt| let $dest:ident := mul $lhs:ident $rhs:ident) =>
-    pure (Stmt.letBin (varOfIdent dest) .mul (varOfIdent lhs) (varOfIdent rhs))
-  | `(dap_stmt| let $dest:ident := div $lhs:ident $rhs:ident) =>
-    pure (Stmt.letBin (varOfIdent dest) .div (varOfIdent lhs) (varOfIdent rhs))
+private def parseRhs : Syntax → TermElabM Rhs
+  | `(dap_rhs| $n:num) => do
+    pure (.const (Int.ofNat (← parseNatLiteral n)))
+  | `(dap_rhs| - $n:num) => do
+    pure (.const (-(Int.ofNat (← parseNatLiteral n))))
+  | `(dap_rhs| add $lhs:ident $rhs:ident) =>
+    pure (.bin .add (varOfIdent lhs) (varOfIdent rhs))
+  | `(dap_rhs| sub $lhs:ident $rhs:ident) =>
+    pure (.bin .sub (varOfIdent lhs) (varOfIdent rhs))
+  | `(dap_rhs| mul $lhs:ident $rhs:ident) =>
+    pure (.bin .mul (varOfIdent lhs) (varOfIdent rhs))
+  | `(dap_rhs| div $lhs:ident $rhs:ident) =>
+    pure (.bin .div (varOfIdent lhs) (varOfIdent rhs))
+  | `(dap_rhs| call $fn:ident($args:ident,*)) =>
+    pure (.call (varOfIdent fn) (args.getElems.map varOfIdent))
   | stx =>
-    throwErrorAt stx "invalid toy-language statement; expected `let v := N`, `let v := -N`, or `let v := op v1 v2`"
+    throwErrorAt stx "invalid right-hand side"
+
+private def parseStmt : Syntax → TermElabM Stmt
+  | `(dap_stmt| let $dest:ident := $rhs:dap_rhs) => do
+    pure (.assign (varOfIdent dest) (← parseRhs rhs))
+  | `(dap_stmt| return $value:ident) =>
+    pure (.return_ (varOfIdent value))
+  | stx =>
+    throwErrorAt stx
+      "invalid toy-language statement; expected `let v := rhs` or `return v`"
 
 private def spanOfSyntax (fileMap : FileMap) (stx : Syntax) : StmtSpan :=
   match stx.getPos?, stx.getTailPos? with
@@ -102,25 +108,71 @@ private def spanOfSyntax (fileMap : FileMap) (stx : Syntax) : StmtSpan :=
   | _, _ =>
     default
 
-private def parseLocatedStmt (fileMap : FileMap) (stmtStx : Syntax) : TermElabM LocatedStmt := do
-  let stmt ← parseStmt stmtStx
-  let span := spanOfSyntax fileMap stmtStx
-  pure { stmt, span }
-
 private def pushProgramInfoNode (stx : Syntax) (located : Array LocatedStmt) : TermElabM Unit := do
   pushInfoLeaf <| .ofCustomInfo
     { stx
       value := Dynamic.mk ({ located } : ProgramSyntaxInfo) }
 
-private def elabLocatedStmtsFromProgramTerm (stx : Syntax) : TermElabM (Array LocatedStmt) := do
-  let fileMap ← getFileMap
-  let stmtStxs := stx[1].getSepArgs
-  stmtStxs.mapM (parseLocatedStmt fileMap)
+private structure ParsedFunc where
+  fn : FuncDef
+  located : Array LocatedStmt
+
+private def parseFunc : FileMap → Syntax → TermElabM ParsedFunc
+  | fileMap, `(dap_func| def $name:ident($params:ident,*) := { $body:dap_stmt,* }) => do
+    let bodyStx := body.getElems
+    let bodyStmt ← bodyStx.mapM parseStmt
+    let mut located : Array LocatedStmt := #[]
+    for h : i in [:bodyStx.size] do
+      let stmtStx := bodyStx[i]
+      let stmt := bodyStmt[i]!
+      located := located.push
+        { func := varOfIdent name
+          stmtLine := i + 1
+          stmt
+          span := spanOfSyntax fileMap stmtStx }
+    pure
+      { fn :=
+          { name := varOfIdent name
+            params := params.getElems.map varOfIdent
+            body := bodyStmt }
+        located }
+  | _, stx =>
+    throwErrorAt stx "invalid function definition"
+
+private def validateFunctionSet (funcs : Array FuncDef) : TermElabM Unit := do
+  if !funcs.any (fun fn => fn.name = Program.mainName) then
+    throwError "Invalid DSL program: missing required entry function `main`."
+  match funcs.find? (fun fn => fn.name = Program.mainName) with
+  | some mainFn =>
+    if !mainFn.params.isEmpty then
+      throwError "Invalid DSL program: `main` must have zero parameters."
+  | none =>
+    pure ()
+  let hasDup :=
+    (funcs.foldl (init := ((#[] : Array FuncName), false)) fun (seen, dup) fn =>
+      if dup then
+        (seen, true)
+      else if seen.contains fn.name then
+        (seen, true)
+      else
+        (seen.push fn.name, false)).2
+  if hasDup then
+    throwError "Invalid DSL program: duplicate function names are not allowed."
 
 @[term_elab dapProgramTerm]
 def elabDapProgram : TermElab := fun stx _expectedType? => withRef stx do
-  let located ← elabLocatedStmtsFromProgramTerm stx
-  let programInfo : ProgramInfo := { program := located.map (·.stmt), located }
+  let fileMap ← getFileMap
+  let funcStx := stx[1].getSepArgs
+  let parsed ← funcStx.mapM (parseFunc fileMap)
+  let functions := parsed.map (·.fn)
+  validateFunctionSet functions
+  let located := parsed.foldl (init := #[]) fun acc p => acc ++ p.located
+  let program : Program := { functions }
+  let programInfo : ProgramInfo := { program, located }
+  let _ ←
+    match programInfo.validate with
+    | .ok info => pure info
+    | .error err => throwError err
   pushProgramInfoNode stx located
   let expr := toExpr programInfo
   addTermInfo' stx expr (isDisplayableTerm := true)

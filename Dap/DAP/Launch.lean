@@ -12,57 +12,28 @@ open Lean
 
 namespace Dap
 
-/-- Launch payload normalized to the runtime program plus optional source spans. -/
 structure LaunchProgram where
-  program : Program
-  stmtSpans : Array StmtSpan := #[]
-
-namespace LaunchProgram
-
-def ofProgramInfo (programInfo : ProgramInfo) : LaunchProgram :=
-  { program := programInfo.program, stmtSpans := programInfo.stmtSpans }
-
-def ofProgram (program : Program) : LaunchProgram :=
-  { program, stmtSpans := #[] }
-
-end LaunchProgram
-
-def decodeProgramJson (json : Json) : Except String Program :=
-  match fromJson? json with
-  | .ok program => pure program
-  | .error err => throw s!"Invalid 'program' payload: {err}"
+  programInfo : ProgramInfo
 
 def decodeProgramInfoJson (json : Json) : Except String ProgramInfo :=
   match (fromJson? json : Except String ProgramInfo) with
   | .ok programInfo =>
-    match programInfo.validate with
-    | .ok info => pure info
-    | .error err => throw err
-  | .error err => throw s!"Invalid 'programInfo' payload: {err}"
+    programInfo.validate
+  | .error err =>
+    throw s!"Invalid 'programInfo' payload: {err}"
 
-def decodeLaunchProgramJson (json : Json) : Except String LaunchProgram :=
-  match decodeProgramInfoJson json with
-  | .ok programInfo =>
-    pure (LaunchProgram.ofProgramInfo programInfo)
-  | .error _ =>
-    match decodeProgramJson json with
-    | .ok program =>
-      pure (LaunchProgram.ofProgram program)
-    | .error err =>
-      throw s!"Invalid program payload: {err}"
+def decodeLaunchProgramJson (json : Json) : Except String LaunchProgram := do
+  let programInfo ← decodeProgramInfoJson json
+  pure { programInfo }
 
 private unsafe def evalLaunchProgramFromDecl
     (env : Environment) (opts : Options) (decl : Name) : Except String LaunchProgram := do
   match env.evalConstCheck ProgramInfo opts ``Dap.ProgramInfo decl with
   | .ok rawProgramInfo =>
     let programInfo ← rawProgramInfo.validate
-    pure (LaunchProgram.ofProgramInfo programInfo)
+    pure { programInfo }
   | .error infoErr =>
-    match env.evalConstCheck Program opts ``Dap.Program decl with
-    | .ok program =>
-      pure (LaunchProgram.ofProgram program)
-    | .error programErr =>
-      throw s!"Declaration '{decl}' is neither Dap.ProgramInfo nor Dap.Program.\nProgramInfo error: {infoErr}\nProgram error: {programErr}"
+    throw s!"Declaration '{decl}' is not Dap.ProgramInfo.\nProgramInfo error: {infoErr}"
 
 def resolveLaunchProgramFromEnv
     (env : Environment)

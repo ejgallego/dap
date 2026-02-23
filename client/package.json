@@ -44,20 +44,12 @@
               },
               "entryPoint": {
                 "type": "string",
-                "default": "mainProgramInfo",
-                "description": "Optional built-in entry point name (mainProgramInfo/mainProgram/sampleProgram) when no program/programFile is provided."
-              },
-              "program": {
-                "type": "array",
-                "description": "Toy program encoded as JSON statements (preferred)."
+                "default": "mainProgram",
+                "description": "Optional entry point declaration name when no programInfo/programInfoFile is provided. Declaration must be Dap.ProgramInfo."
               },
               "programInfo": {
                 "type": "object",
-                "description": "Optional source-aware payload (`Dap.ProgramInfo`) including statement spans for accurate source line mapping."
-              },
-              "programFile": {
-                "type": "string",
-                "description": "Path to a JSON file containing either a toy program array or a full `Dap.ProgramInfo` object."
+                "description": "Optional source-aware payload (`Dap.ProgramInfo`) including function-aware statement spans for source mapping."
               },
               "programInfoFile": {
                 "type": "string",
@@ -90,7 +82,7 @@
               "type": "lean-toy-dap",
               "request": "launch",
               "source": "${file}",
-              "entryPoint": "mainProgramInfo",
+              "entryPoint": "mainProgram",
               "toydapPath": "${workspaceFolder}/.lake/build/bin/toydap",
               "stopOnEntry": true
             }

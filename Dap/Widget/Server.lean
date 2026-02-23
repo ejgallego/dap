@@ -27,7 +27,7 @@ export default function(props) {
   const maxIndex = Math.max(states.length - 1, 0);
   const [cursor, setCursor] = React.useState(0);
   const idx = clamp(cursor, 0, maxIndex);
-  const state = states[idx] || { pc: 0, bindings: [] };
+  const state = states[idx] || { functionName: 'main', pc: 0, callDepth: 1, bindings: [] };
 
   const canBack = idx > 0;
   const canForward = idx < maxIndex;
@@ -38,7 +38,7 @@ export default function(props) {
       {
         key: i,
         style: {
-          background: state.pc === i ? '#e9f2ff' : 'transparent',
+          background: state.functionName === 'main' && state.pc === i ? '#e9f2ff' : 'transparent',
           borderRadius: '4px',
           padding: '2px 4px'
         }
@@ -66,7 +66,9 @@ export default function(props) {
         e('button', { key: 'back', onClick: () => setCursor(idx - 1), disabled: !canBack }, 'Back'),
         e('button', { key: 'forward', onClick: () => setCursor(idx + 1), disabled: !canForward }, 'Forward'),
         e('span', { key: 'step' }, 'State ' + String(idx) + '/' + String(maxIndex)),
-        e('span', { key: 'pc', style: { marginLeft: '8px' } }, 'pc = ' + String(state.pc))
+        e('span', { key: 'fn', style: { marginLeft: '8px' } }, 'fn = ' + String(state.functionName)),
+        e('span', { key: 'pc', style: { marginLeft: '8px' } }, 'pc = ' + String(state.pc)),
+        e('span', { key: 'depth', style: { marginLeft: '8px' } }, 'depth = ' + String(state.callDepth))
       ]),
       e('div', {
         key: 'body',

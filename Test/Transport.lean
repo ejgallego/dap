@@ -71,7 +71,7 @@ def testToyDapBreakpointProtocol : IO Unit := do
     String.intercalate ""
       [ encodeDapRequest 1 "initialize",
         encodeDapRequest 2 "setBreakpoints" <| Json.mkObj
-          [ ("breakpoints", Json.arr #[Json.mkObj [("line", toJson (3 : Nat))]]) ],
+          [ ("breakpoints", Json.arr #[Json.mkObj [("line", toJson (22 : Nat))]]) ],
         encodeDapRequest 3 "launch" <| Json.mkObj
           [ ("entryPoint", toJson "mainProgram"),
             ("stopOnEntry", toJson false) ],
@@ -111,6 +111,28 @@ def testToyDapContinueEventOrder : IO Unit := do
     (appearsBefore stdout continueRespMarker "\"event\":\"stopped\"" ||
       appearsBefore stdout continueRespMarker "\"event\":\"terminated\"")
 
+def testToyDapStepInOutProtocol : IO Unit := do
+  let stdinPayload :=
+    String.intercalate ""
+      [ encodeDapRequest 1 "initialize",
+        encodeDapRequest 2 "launch" <| Json.mkObj
+          [ ("entryPoint", toJson "mainProgram"),
+            ("stopOnEntry", toJson true) ],
+        encodeDapRequest 3 "stepIn",
+        encodeDapRequest 4 "stepIn",
+        encodeDapRequest 5 "stepOut",
+        encodeDapRequest 6 "disconnect" ]
+  let stdout ← runToyDapPayload "toydap.stepinout" stdinPayload
+  assertTrue "stepIn response present"
+    (stdout.contains "\"request_seq\":3" && stdout.contains "\"command\":\"stepIn\"")
+  assertTrue "second stepIn response present"
+    (stdout.contains "\"request_seq\":4" && stdout.contains "\"command\":\"stepIn\"")
+  assertTrue "stepOut response present"
+    (stdout.contains "\"request_seq\":5" && stdout.contains "\"command\":\"stepOut\"")
+  assertTrue "stepOut emits a stop/terminate event"
+    (appearsBefore stdout "\"request_seq\":5" "\"event\":\"stopped\"" ||
+      appearsBefore stdout "\"request_seq\":5" "\"event\":\"terminated\"")
+
 def testToyDapLaunchTerminatesOrder : IO Unit := do
   let stdinPayload :=
     String.intercalate ""
@@ -134,6 +156,7 @@ def runTransportTests : IO Unit := do
   testToyDapProtocolSanity
   testToyDapBreakpointProtocol
   testToyDapContinueEventOrder
+  testToyDapStepInOutProtocol
   testToyDapLaunchTerminatesOrder
 
 end Dap.Tests

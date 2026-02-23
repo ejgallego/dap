@@ -1,138 +1,141 @@
 {
-  "program": [
-    {
-      "rhs": {
-        "const": {
-          "value": 6
-        }
+  "program": {
+    "functions": [
+      {
+        "name": "combine",
+        "params": ["x", "y", "z"],
+        "body": [
+          {
+            "dest": "sum",
+            "rhs": {
+              "bin": {
+                "op": "add",
+                "lhs": "x",
+                "rhs": "y"
+              }
+            }
+          },
+          {
+            "dest": "prod",
+            "rhs": {
+              "bin": {
+                "op": "mul",
+                "lhs": "sum",
+                "rhs": "z"
+              }
+            }
+          },
+          {
+            "return": "prod"
+          }
+        ]
       },
-      "dest": "x"
-    },
-    {
-      "rhs": {
-        "const": {
-          "value": 3
-        }
-      },
-      "dest": "y"
-    },
-    {
-      "rhs": {
-        "bin": {
-          "rhs": "y",
-          "op": "add",
-          "lhs": "x"
-        }
-      },
-      "dest": "sum"
-    },
-    {
-      "rhs": {
-        "bin": {
-          "rhs": "y",
-          "op": "mul",
-          "lhs": "sum"
-        }
-      },
-      "dest": "prod"
-    },
-    {
-      "rhs": {
-        "bin": {
-          "rhs": "x",
-          "op": "div",
-          "lhs": "prod"
-        }
-      },
-      "dest": "quot"
-    }
-  ],
+      {
+        "name": "main",
+        "params": [],
+        "body": [
+          {
+            "dest": "x",
+            "rhs": { "const": { "value": 6 } }
+          },
+          {
+            "dest": "y",
+            "rhs": { "const": { "value": 3 } }
+          },
+          {
+            "dest": "z",
+            "rhs": { "const": { "value": 4 } }
+          },
+          {
+            "dest": "out",
+            "rhs": {
+              "call": {
+                "fn": "combine",
+                "args": ["x", "y", "z"]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
   "located": [
     {
+      "func": "combine",
+      "stmtLine": 1,
       "stmt": {
-        "rhs": {
-          "const": {
-            "value": 6
-          }
-        },
-        "dest": "x"
-      },
-      "span": {
-        "startLine": 10,
-        "startColumn": 2,
-        "endLine": 10,
-        "endColumn": 12
-      }
-    },
-    {
-      "stmt": {
-        "rhs": {
-          "const": {
-            "value": 3
-          }
-        },
-        "dest": "y"
-      },
-      "span": {
-        "startLine": 11,
-        "startColumn": 2,
-        "endLine": 11,
-        "endColumn": 12
-      }
-    },
-    {
-      "stmt": {
+        "dest": "sum",
         "rhs": {
           "bin": {
-            "rhs": "y",
             "op": "add",
-            "lhs": "x"
+            "lhs": "x",
+            "rhs": "y"
           }
-        },
-        "dest": "sum"
+        }
       },
-      "span": {
-        "startLine": 12,
-        "startColumn": 2,
-        "endLine": 12,
-        "endColumn": 20
-      }
+      "span": { "startLine": 16, "startColumn": 4, "endLine": 16, "endColumn": 22 }
     },
     {
+      "func": "combine",
+      "stmtLine": 2,
       "stmt": {
+        "dest": "prod",
         "rhs": {
           "bin": {
-            "rhs": "y",
             "op": "mul",
-            "lhs": "sum"
+            "lhs": "sum",
+            "rhs": "z"
           }
-        },
-        "dest": "prod"
+        }
       },
-      "span": {
-        "startLine": 13,
-        "startColumn": 2,
-        "endLine": 13,
-        "endColumn": 23
-      }
+      "span": { "startLine": 17, "startColumn": 4, "endLine": 17, "endColumn": 24 }
     },
     {
+      "func": "combine",
+      "stmtLine": 3,
+      "stmt": { "return": "prod" },
+      "span": { "startLine": 18, "startColumn": 4, "endLine": 18, "endColumn": 15 }
+    },
+    {
+      "func": "main",
+      "stmtLine": 1,
       "stmt": {
-        "rhs": {
-          "bin": {
-            "rhs": "x",
-            "op": "div",
-            "lhs": "prod"
-          }
-        },
-        "dest": "quot"
+        "dest": "x",
+        "rhs": { "const": { "value": 6 } }
       },
-      "span": {
-        "startLine": 14,
-        "startColumn": 2,
-        "endLine": 14,
-        "endColumn": 24
-      }
+      "span": { "startLine": 21, "startColumn": 4, "endLine": 21, "endColumn": 14 }
+    },
+    {
+      "func": "main",
+      "stmtLine": 2,
+      "stmt": {
+        "dest": "y",
+        "rhs": { "const": { "value": 3 } }
+      },
+      "span": { "startLine": 22, "startColumn": 4, "endLine": 22, "endColumn": 14 }
+    },
+    {
+      "func": "main",
+      "stmtLine": 3,
+      "stmt": {
+        "dest": "z",
+        "rhs": { "const": { "value": 4 } }
+      },
+      "span": { "startLine": 23, "startColumn": 4, "endLine": 23, "endColumn": 14 }
+    },
+    {
+      "func": "main",
+      "stmtLine": 4,
+      "stmt": {
+        "dest": "out",
+        "rhs": {
+          "call": {
+            "fn": "combine",
+            "args": ["x", "y", "z"]
+          }
+        }
+      },
+      "span": { "startLine": 24, "startColumn": 4, "endLine": 24, "endColumn": 36 }
     }
   ]
 }

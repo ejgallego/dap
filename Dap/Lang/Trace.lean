@@ -26,7 +26,7 @@ def state? (trace : ExecutionTrace) (idx : Nat) : Option Context :=
   trace.states[idx]?
 
 def build (program : Program) (start : Context := Context.initial) : Except EvalError ExecutionTrace := do
-  let fuel := program.size + 1
+  let fuel := program.defaultFuel
   let rec go : Nat → Context → Array Context → Except EvalError (Array Context)
     | 0, _, _ =>
       throw (.outOfFuel fuel)

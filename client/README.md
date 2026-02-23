@@ -20,7 +20,7 @@ npm install
 npm run compile
 ```
 
-Then package/sideload as you usually do (e.g. `vsce package` and install VSIX).
+Then package/sideload as you usually do (for example `vsce package` and install VSIX).
 
 ## Launch configuration
 
@@ -30,8 +30,13 @@ Use debug type `lean-toy-dap`.
 - Optional source path shown in stack traces.
 
 Entry point:
-- If neither `program` nor `programFile` are provided, `entryPoint` defaults to `mainProgramInfo`.
-- `entryPoint` is resolved as a Lean declaration name (supports both `Dap.ProgramInfo` and `Dap.Program`; unqualified names also try `Main.<name>` and `Dap.Lang.Examples.<name>`).
+- If `entryPoint` is omitted, it defaults to `mainProgram`.
+- `entryPoint` resolves as a Lean declaration name and must evaluate to `Dap.ProgramInfo`.
+- Unqualified names also try `Main.<name>` and `Dap.Lang.Examples.<name>`.
+
+Alternative launch payloads:
+- `programInfo`: inline `Dap.ProgramInfo` JSON payload.
+- `programInfoFile`: path to JSON file containing `Dap.ProgramInfo`.
 
 Adapter executable:
 - `toydapPath` (optional): explicit path to the `toydap` binary.
@@ -46,27 +51,17 @@ Example:
   "request": "launch",
   "source": "${file}",
   "toydapPath": "${workspaceFolder}/.lake/build/bin/toydap",
-  "entryPoint": "mainProgramInfo",
+  "entryPoint": "mainProgram",
   "stopOnEntry": true
 }
 ```
 
-Program launch mode:
-- `program` (inline JSON array), or
-- `programFile` (path to JSON file containing either that array or a full `ProgramInfo` object), or
-- `programInfo` / `programInfoFile` (`ProgramInfo` payload with source spans).
+For JSON launch payloads, see `client/programInfo.sample.json`.
+You can also generate `ProgramInfo` JSON via:
 
-A ready-to-run sample is included at `client/program.sample.json`.
-For source-line-accurate breakpoints/stack traces, use `client/programInfo.sample.json`.
-You can also auto-generate `ProgramInfo` JSON via `lake exe dap-export` (see repository `README.md`).
-
-## Program JSON format
-
-Each statement is:
-- `{"dest":"x","rhs":{"const":{"value":6}}}` or
-- `{"dest":"z","rhs":{"bin":{"op":"add","lhs":"x","rhs":"y"}}}`
-
-Operator values: `add`, `sub`, `mul`, `div`.
+```bash
+lake exe dap-export --decl mainProgram --out .dap/programInfo.generated.json
+```
 
 ## Supported DAP requests
 
@@ -80,6 +75,8 @@ Handled by `toydap`:
 - `scopes`
 - `variables`
 - `next`
+- `stepIn`
+- `stepOut`
 - `stepBack`
 - `continue`
 - `pause`
@@ -87,5 +84,5 @@ Handled by `toydap`:
 
 ## Notes
 
-- Breakpoints are interpreted as statement lines in the toy program (1-based).
-- Variables scope is currently a single `locals` scope.
+- Breakpoints are line-based and resolved through function-aware `ProgramInfo` locations.
+- Variables are exposed as a `locals` scope per selected stack frame.

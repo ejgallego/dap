@@ -17,7 +17,9 @@ structure BindingView where
   deriving Repr, Inhabited, BEq, Server.RpcEncodable
 
 structure StateView where
+  functionName : String
   pc : Nat
+  callDepth : Nat
   bindings : Array BindingView
   deriving Repr, Inhabited, BEq, Server.RpcEncodable
 
@@ -30,7 +32,9 @@ def BindingView.ofPair (entry : Var × Value) : BindingView :=
   { name := entry.1, value := entry.2 }
 
 def StateView.ofContext (ctx : Context) : StateView :=
-  { pc := ctx.pc
+  { functionName := ctx.functionName
+    pc := ctx.pc
+    callDepth := ctx.callDepth
     bindings := ctx.bindings.map BindingView.ofPair }
 
 def TraceWidgetProps.ofTrace (trace : ExecutionTrace) : TraceWidgetProps :=

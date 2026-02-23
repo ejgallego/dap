@@ -118,20 +118,14 @@ private def resolveLaunchProgram (args : Json) : IO LaunchProgram := do
   if let some programInfoJson := (args.getObjVal? "programInfo").toOption then
     match Dap.decodeProgramInfoJson programInfoJson with
     | .ok programInfo =>
-      pure (LaunchProgram.ofProgramInfo programInfo)
+      pure { programInfo }
     | .error err =>
       throw <| IO.userError err
-  else if let some programJson := (args.getObjVal? "program").toOption then
-    match Dap.decodeProgramJson programJson with
-    | .ok program => pure (LaunchProgram.ofProgram program)
-    | .error err => throw <| IO.userError err
   else if let some programInfoFile := (args.getObjValAs? String "programInfoFile").toOption then
     readLaunchProgramFile programInfoFile
-  else if let some programFile := (args.getObjValAs? String "programFile").toOption then
-    readLaunchProgramFile programFile
   else
-    let rawEntry := (args.getObjValAs? String "entryPoint").toOption.getD "mainProgramInfo"
-    let entry := if rawEntry.trimAscii.toString = "" then "mainProgramInfo" else rawEntry
+    let rawEntry := (args.getObjValAs? String "entryPoint").toOption.getD "mainProgram"
+    let entry := if rawEntry.trimAscii.toString = "" then "mainProgram" else rawEntry
     programFromEntryPoint entry
 
 private def sourceJson? (sourcePath? : Option String) : Option Json := do
@@ -174,7 +168,7 @@ private def handleLaunch (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)
   let activeBreakpoints := if breakpoints.isEmpty then pending else breakpoints
   let st ← stRef.get
   let (core, launch) ←
-    match Dap.launchFromProgram st.core launchProgram.program stopOnEntry activeBreakpoints launchProgram.stmtSpans with
+    match Dap.launchFromProgramInfo st.core launchProgram.programInfo stopOnEntry activeBreakpoints with
     | .ok value => pure value
     | .error err => throw <| IO.userError err
   stRef.modify fun st =>
@@ -297,6 +291,28 @@ private def handleNext (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)
   sendResponse stdout stRef req
   emitStopOrTerminate stdout stRef response.stopReason response.terminated
 
+private def handleStepIn (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)
+    (req : DapRequest) : IO Unit := do
+  let sessionId ← requireActiveSessionId stRef
+  let (core, response) ←
+    match Dap.stepIn (← stRef.get).core sessionId with
+    | .ok value => pure value
+    | .error err => throw <| IO.userError err
+  stRef.modify fun st => { st with core }
+  sendResponse stdout stRef req
+  emitStopOrTerminate stdout stRef response.stopReason response.terminated
+
+private def handleStepOut (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)
+    (req : DapRequest) : IO Unit := do
+  let sessionId ← requireActiveSessionId stRef
+  let (core, response) ←
+    match Dap.stepOut (← stRef.get).core sessionId with
+    | .ok value => pure value
+    | .error err => throw <| IO.userError err
+  stRef.modify fun st => { st with core }
+  sendResponse stdout stRef req
+  emitStopOrTerminate stdout stRef response.stopReason response.terminated
+
 private def handleStepBack (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)
     (req : DapRequest) : IO Unit := do
   let sessionId ← requireActiveSessionId stRef
@@ -355,6 +371,8 @@ private def handleRequest (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)
     | "scopes" => handleScopes stdout stRef req
     | "variables" => handleVariables stdout stRef req
     | "next" => handleNext stdout stRef req
+    | "stepIn" => handleStepIn stdout stRef req
+    | "stepOut" => handleStepOut stdout stRef req
     | "stepBack" => handleStepBack stdout stRef req
     | "continue" => handleContinue stdout stRef req
     | "pause" => handlePause stdout stRef req

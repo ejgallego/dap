@@ -23,7 +23,7 @@ instance : ToString SessionStatus where
 
 structure SessionData where
   session : DebugSession
-  stmtSpans : Array StmtSpan := #[]
+  programInfo : ProgramInfo
   status : SessionStatus := .stopped
   deriving Repr
 
@@ -117,101 +117,92 @@ private def ensureControllable (data : SessionData) (sessionId : Nat) : Except S
   else
     pure ()
 
-private def requestedLineToStmtLine?
-    (programSize : Nat) (spans : Array StmtSpan) (line : Nat) : Option Nat :=
-  let stmtLine? :=
-    if spans.isEmpty then
-      some line
-    else
-      ProgramInfo.sourceLineToStmtLine? spans line
-  stmtLine?.bind fun stmtLine =>
-    if DebugSession.isValidBreakpointLine programSize stmtLine then
-      some stmtLine
+private def requestedLineToLocation? (info : ProgramInfo) (line : Nat) : Option StmtLocation :=
+  let loc? := info.sourceLineToLocation? line
+  loc?.bind fun loc =>
+    if DebugSession.isValidBreakpointLocation info.program loc then
+      some loc
     else
       none
 
-private def ensureCompatibleStmtSpans
-    (programSize : Nat) (stmtSpans : Array StmtSpan) : Except String Unit :=
-  if ProgramInfo.spansCompatibleWithProgramSize programSize stmtSpans then
-    .ok ()
-  else
-    .error <|
-      s!"Launch failed: incompatible statement spans. Program has {programSize} statements " ++
-      s!"but span array has {stmtSpans.size} entries (must be 0 or match program size)."
-
-private def normalizeRequestedBreakpoints
-    (programSize : Nat) (spans : Array StmtSpan) (lines : Array Nat) : Array Nat :=
+private def normalizeRequestedBreakpoints (info : ProgramInfo) (lines : Array Nat) : Array StmtLocation :=
   lines.foldl
     (init := #[])
     (fun acc line =>
-      let stmtLine? := requestedLineToStmtLine? programSize spans line
-      match stmtLine? with
-      | some stmtLine =>
-        if !acc.contains stmtLine then
-          acc.push stmtLine
+      match requestedLineToLocation? info line with
+      | some loc =>
+        if !acc.contains loc then
+          acc.push loc
         else
           acc
       | none =>
         acc)
 
-private def mkBreakpointView (programSize : Nat) (spans : Array StmtSpan) (line : Nat) : BreakpointView :=
-  if spans.isEmpty then
-    match requestedLineToStmtLine? programSize spans line with
-    | some _ =>
+private def mkBreakpointView (info : ProgramInfo) (line : Nat) : BreakpointView :=
+  match info.sourceLineToLocation? line with
+  | none =>
+    { line, verified := false, message? := some s!"No statement maps to source line {line}" }
+  | some loc =>
+    if DebugSession.isValidBreakpointLocation info.program loc then
       { line, verified := true }
-    | none =>
-      { line, verified := false, message? := some s!"Line {line} is outside the valid range 1..{programSize}" }
-  else
-    match ProgramInfo.sourceLineToStmtLine? spans line with
-    | none =>
-      { line, verified := false, message? := some s!"No statement maps to source line {line}" }
-    | some stmtLine =>
-      if DebugSession.isValidBreakpointLine programSize stmtLine then
-        { line, verified := true }
-      else
-        { line
-          verified := false
-          message? := some
-            s!"Source line {line} maps to statement line {stmtLine}, outside the valid range 1..{programSize}." }
+    else
+      { line
+        verified := false
+        message? := some s!"Source line {line} maps to invalid location {loc.func}:{loc.stmtLine}" }
 
-private def currentFrameName (session : DebugSession) : String :=
-  let pc := session.currentPc
-  match session.program[pc]? with
-  | some stmt => toString stmt
-  | none => "<terminated>"
+private def frameName (session : DebugSession) (frame : CallFrame) : String :=
+  match session.frameStmt? frame with
+  | some stmt => s!"{frame.func}: {stmt}"
+  | none => s!"{frame.func}: <terminated>"
+
+private def stackFramesInDisplayOrder (session : DebugSession) : Array CallFrame :=
+  session.callFrames.reverse
+
+private def stackFrameAt? (session : DebugSession) (frameId : Nat) : Option CallFrame :=
+  (stackFramesInDisplayOrder session)[frameId]?
+
+private def frameSourceLine (info : ProgramInfo) (session : DebugSession) (frame : CallFrame) : Nat :=
+  info.locationToSourceLine (session.frameLocation frame)
 
 private def mkControlResponse (data : SessionData) (reason : StopReason) : ControlResponse :=
   let session := data.session
-  { line := ProgramInfo.stmtLineToSourceLine data.stmtSpans session.currentLine
+  let line :=
+    match stackFrameAt? session 0 with
+    | some frame => frameSourceLine data.programInfo session frame
+    | none => 1
+  { line
     stopReason := toString reason
     terminated := session.atEnd || reason = .terminated }
 
-def launchFromProgram
+def launchFromProgramInfo
     (store : SessionStore)
-    (program : Program)
+    (programInfo : ProgramInfo)
     (stopOnEntry : Bool)
-    (breakpoints : Array Nat)
-    (stmtSpans : Array StmtSpan := #[]) : Except String (SessionStore × LaunchResponse) := do
-  ensureCompatibleStmtSpans program.size stmtSpans
+    (breakpoints : Array Nat) : Except String (SessionStore × LaunchResponse) := do
+  let programInfo ← programInfo.validate
   let session ←
-    match DebugSession.fromProgram program with
+    match DebugSession.fromProgram programInfo.program with
     | .ok session => pure session
     | .error err => throw s!"Launch failed: {err}"
-  let normalizedBreakpoints := normalizeRequestedBreakpoints program.size stmtSpans breakpoints
+  let normalizedBreakpoints := normalizeRequestedBreakpoints programInfo breakpoints
   let session := session.setBreakpoints normalizedBreakpoints
   let (session, stopReason) ←
     match session.initialStop stopOnEntry with
     | .ok value => pure value
     | .error err => throw s!"Launch failed: {err}"
   let sessionId := store.nextId
-  let data : SessionData := { session, stmtSpans, status := statusFromStopReason stopReason }
+  let data : SessionData := { session, programInfo, status := statusFromStopReason stopReason }
   let store :=
     { nextId := sessionId + 1
       sessions := store.sessions.insert sessionId data }
+  let line :=
+    match stackFrameAt? session 0 with
+    | some frame => frameSourceLine programInfo session frame
+    | none => 1
   let response : LaunchResponse :=
     { sessionId
       threadId := 1
-      line := ProgramInfo.stmtLineToSourceLine stmtSpans session.currentLine
+      line
       stopReason := toString stopReason
       terminated := session.atEnd || stopReason = .terminated }
   pure (store, response)
@@ -222,11 +213,10 @@ def setBreakpoints
     (breakpoints : Array Nat) : Except String (SessionStore × SetBreakpointsResponse) := do
   let data ← getSessionData store sessionId
   ensureControllable data sessionId
-  let programSize := data.session.program.size
-  let normalized := normalizeRequestedBreakpoints programSize data.stmtSpans breakpoints
+  let normalized := normalizeRequestedBreakpoints data.programInfo breakpoints
   let data := { data with session := data.session.setBreakpoints normalized }
   let store := putSessionData store sessionId data
-  let views := breakpoints.map (mkBreakpointView programSize data.stmtSpans)
+  let views := breakpoints.map (mkBreakpointView data.programInfo)
   pure (store, { breakpoints := views })
 
 def threads (_store : SessionStore) : ThreadsResponse :=
@@ -250,6 +240,12 @@ private def applyControl
 def next (store : SessionStore) (sessionId : Nat) : Except String (SessionStore × ControlResponse) :=
   applyControl store sessionId DebugSession.next
 
+def stepIn (store : SessionStore) (sessionId : Nat) : Except String (SessionStore × ControlResponse) :=
+  applyControl store sessionId DebugSession.stepIn
+
+def stepOut (store : SessionStore) (sessionId : Nat) : Except String (SessionStore × ControlResponse) :=
+  applyControl store sessionId DebugSession.stepOut
+
 def stepBack (store : SessionStore) (sessionId : Nat) : Except String (SessionStore × ControlResponse) :=
   applyControl store sessionId (fun s => pure (DebugSession.stepBack s))
 
@@ -270,24 +266,30 @@ def stackTrace
   ensureControllable data sessionId
   let session := data.session
   let fullFrames :=
-    #[{ id := 0
-        name := currentFrameName session
-        line := ProgramInfo.stmtLineToSourceLine data.stmtSpans session.currentLine
-        column := 1 : StackFrameView }]
-  let frames :=
-    if startFrame > 0 || levels = 0 then
-      #[]
+    (stackFramesInDisplayOrder session).foldl
+      (init := #[])
+      (fun acc frame =>
+        let frameId := acc.size
+        acc.push
+          { id := frameId
+            name := frameName session frame
+            line := frameSourceLine data.programInfo session frame
+            column := 1 : StackFrameView })
+  let start := min startFrame fullFrames.size
+  let stop :=
+    if levels = 0 then
+      start
     else
-      fullFrames
+      min (start + levels) fullFrames.size
   pure
-    { stackFrames := frames
+    { stackFrames := fullFrames.extract start stop
       totalFrames := fullFrames.size }
 
 def scopes (store : SessionStore) (sessionId : Nat) (frameId : Nat := 0) : Except String ScopesResponse := do
   let data ← getSessionData store sessionId
   ensureControllable data sessionId
-  if frameId = 0 then
-    pure { scopes := #[{ name := "locals", variablesReference := 1 }] }
+  if (stackFrameAt? data.session frameId).isSome then
+    pure { scopes := #[{ name := "locals", variablesReference := frameId + 1 }] }
   else
     pure { scopes := #[] }
 
@@ -297,13 +299,18 @@ def variables
     (variablesReference : Nat) : Except String VariablesResponse := do
   let data ← getSessionData store sessionId
   ensureControllable data sessionId
-  if variablesReference != 1 then
+  if variablesReference = 0 then
     pure { variables := #[] }
   else
-    let variables :=
-      data.session.bindings.map fun (name, value) =>
-        { name, value := toString value : VariableView }
-    pure { variables }
+    let frameId := variablesReference - 1
+    match stackFrameAt? data.session frameId with
+    | none =>
+      pure { variables := #[] }
+    | some frame =>
+      let variables :=
+        frame.env.toArray.map fun (name, value) =>
+          { name, value := toString value : VariableView }
+      pure { variables }
 
 def disconnect (store : SessionStore) (sessionId : Nat) : SessionStore × Bool :=
   let existed := (store.sessions.get? sessionId).isSome

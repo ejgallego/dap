@@ -29,12 +29,16 @@ structure DebugSession where
   program : Program
   history : Array Context := #[Context.initial]
   cursor : Nat := 0
-  breakpoints : Array Nat := #[]
+  breakpoints : Array StmtLocation := #[]
   deriving Repr
 
 namespace DebugSession
 
 def fromProgram (program : Program) : Except EvalError DebugSession := do
+  if !program.hasMain then
+    throw (.unknownFunction Program.mainName)
+  if !program.mainHasNoParams then
+    throw (.arityMismatch Program.mainName 0 (((program.mainFunction?).map (·.params.size)).getD 0))
   pure { program }
 
 def maxCursor (session : DebugSession) : Nat :=
@@ -49,46 +53,87 @@ def current? (session : DebugSession) : Option Context :=
 def currentPc (session : DebugSession) : Nat :=
   (session.current?.map (·.pc)).getD 0
 
+def currentFuncName (session : DebugSession) : FuncName :=
+  (session.current?.map (·.functionName)).getD Program.mainName
+
 def currentLine (session : DebugSession) : Nat :=
-  let psize := session.program.size
-  let fallback := max psize 1
-  if psize = 0 then
+  let bodySize := session.program.bodySizeOf session.currentFuncName
+  let fallback := max bodySize 1
+  if bodySize = 0 then
     1
   else
     match session.current? with
     | none => fallback
     | some ctx =>
-      if ctx.pc < psize then
+      if ctx.pc < bodySize then
         ctx.pc + 1
       else
-        psize
+        bodySize
+
+def frameLine (session : DebugSession) (frame : CallFrame) : Nat :=
+  let bodySize := session.program.bodySizeOf frame.func
+  if bodySize = 0 then
+    1
+  else if frame.pc < bodySize then
+    frame.pc + 1
+  else
+    bodySize
+
+def currentLocation? (session : DebugSession) : Option StmtLocation := do
+  let ctx ← session.current?
+  let line := session.frameLine ctx.current
+  pure { func := ctx.functionName, stmtLine := line }
+
+def frameLocation (session : DebugSession) (frame : CallFrame) : StmtLocation :=
+  { func := frame.func, stmtLine := session.frameLine frame }
+
+def currentStmt? (session : DebugSession) : Option Stmt := do
+  let ctx ← session.current?
+  session.program.stmtAt? ctx.functionName ctx.pc
+
+def frameStmt? (session : DebugSession) (frame : CallFrame) : Option Stmt :=
+  session.program.stmtAt? frame.func frame.pc
+
+def callFrames (session : DebugSession) : Array CallFrame :=
+  (session.current?.map Context.frames).getD #[]
 
 def atEnd (session : DebugSession) : Bool :=
-  (session.current?.map (fun ctx => decide (ctx.pc >= session.program.size))).getD true
+  match session.current? with
+  | none => true
+  | some ctx =>
+    let bodySize := session.program.bodySizeOf ctx.functionName
+    ctx.callers.isEmpty && ctx.current.retDest?.isNone && ctx.pc >= bodySize
 
-def isValidBreakpointLine (programSize line : Nat) : Bool :=
-  0 < line && line <= programSize
+def isValidBreakpointLocation (program : Program) (loc : StmtLocation) : Bool :=
+  match program.bodyOf? loc.func with
+  | some body => 0 < loc.stmtLine && loc.stmtLine <= body.size
+  | none => false
 
-def normalizeBreakpoints (programSize : Nat) (lines : Array Nat) : Array Nat :=
-  lines.foldl
+def normalizeBreakpoints (program : Program) (locs : Array StmtLocation) : Array StmtLocation :=
+  locs.foldl
     (init := #[])
-    (fun acc line =>
-      if isValidBreakpointLine programSize line && !acc.contains line then
-        acc.push line
+    (fun acc loc =>
+      if isValidBreakpointLocation program loc && !acc.contains loc then
+        acc.push loc
       else
         acc)
 
-def setBreakpoints (session : DebugSession) (lines : Array Nat) : DebugSession :=
-  { session with breakpoints := normalizeBreakpoints session.program.size lines }
+def setBreakpoints (session : DebugSession) (locs : Array StmtLocation) : DebugSession :=
+  { session with breakpoints := normalizeBreakpoints session.program locs }
 
-def isBreakpointLine (session : DebugSession) (line : Nat) : Bool :=
-  session.breakpoints.contains line
+def isBreakpointLocation (session : DebugSession) (loc : StmtLocation) : Bool :=
+  session.breakpoints.contains loc
 
 def hitBreakpoint (session : DebugSession) : Bool :=
-  session.isBreakpointLine session.currentLine
+  match session.currentLocation? with
+  | some loc => session.isBreakpointLocation loc
+  | none => false
 
 def bindings (session : DebugSession) : Array (Var × Value) :=
   (session.current?.map Context.bindings).getD #[]
+
+def currentCallDepth (session : DebugSession) : Nat :=
+  (session.current?.map Context.callDepth).getD 0
 
 def next (session : DebugSession) : Except EvalError (DebugSession × StopReason) := do
   let session := session.normalize
@@ -103,7 +148,7 @@ def next (session : DebugSession) : Except EvalError (DebugSession × StopReason
       match session.current? with
       | some ctx => pure ctx
       | none => throw (.invalidPc session.cursor session.history.size)
-    if ctx.pc >= session.program.size then
+    if session.atEnd then
       pure (session, .terminated)
     else
       match ← step session.program ctx with
@@ -117,6 +162,9 @@ def next (session : DebugSession) : Except EvalError (DebugSession × StopReason
         else
           pure (nextSession, .step)
 
+def stepIn (session : DebugSession) : Except EvalError (DebugSession × StopReason) :=
+  session.next
+
 def stepBack (session : DebugSession) : DebugSession × StopReason :=
   let session := session.normalize
   if !History.hasPrev session.history session.cursor then
@@ -129,7 +177,7 @@ def continueExecution (session : DebugSession) : Except EvalError (DebugSession 
   if session.atEnd then
     pure (session, .terminated)
   else
-    let fuel := session.program.size + 1
+    let fuel := session.program.defaultFuel
     let rec go : Nat → DebugSession → Except EvalError (DebugSession × StopReason)
       | 0, s =>
         pure (s, .pause)
@@ -144,6 +192,34 @@ def continueExecution (session : DebugSession) : Except EvalError (DebugSession 
           else
             go fuel' s
     go fuel session
+
+def stepOut (session : DebugSession) : Except EvalError (DebugSession × StopReason) := do
+  let session := session.normalize
+  if session.atEnd then
+    pure (session, .terminated)
+  else
+    let startDepth := session.currentCallDepth
+    if startDepth ≤ 1 then
+      session.continueExecution
+    else
+      let fuel := session.program.defaultFuel
+      let rec go : Nat → DebugSession → Except EvalError (DebugSession × StopReason)
+        | 0, s =>
+          pure (s, .pause)
+        | fuel' + 1, s => do
+          let (s, reason) ← s.next
+          match reason with
+          | .terminated =>
+            pure (s, .terminated)
+          | _ =>
+            let depth := s.currentCallDepth
+            if depth < startDepth then
+              pure (s, .step)
+            else if s.hitBreakpoint then
+              pure (s, .breakpoint)
+            else
+              go fuel' s
+      go fuel session
 
 def initialStop (session : DebugSession) (stopOnEntry : Bool) :
     Except EvalError (DebugSession × StopReason) := do

@@ -25,14 +25,13 @@ structure InitializeResponse where
   deriving Inhabited, Repr, FromJson, ToJson
 
 structure LaunchParams where
-  programInfo? : Option ProgramInfo := none
-  program? : Option Program := none
+  programInfo : ProgramInfo
   stopOnEntry : Bool := true
   breakpoints : Array Nat := #[]
   deriving Inhabited, Repr, FromJson, ToJson
 
 structure LaunchMainParams where
-  entryPoint : String := "mainProgramInfo"
+  entryPoint : String := "mainProgram"
   line : Nat := 0
   character : Nat := 0
   stopOnEntry : Bool := true
@@ -99,14 +98,13 @@ private def runCoreResult (result : Except String α) : RequestM α :=
 private def updateStore (store : SessionStore) : IO Unit :=
   dapSessionStoreRef.set store
 
-private def launchFromProgram
-    (program : Program)
+private def launchFromProgramInfo
+    (programInfo : ProgramInfo)
     (stopOnEntry : Bool)
-    (breakpoints : Array Nat)
-    (stmtSpans : Array StmtSpan := #[]) : RequestM LaunchResponse := do
+    (breakpoints : Array Nat) : RequestM LaunchResponse := do
   let store ← dapSessionStoreRef.get
   let (store, response) ← runCoreResult <|
-    Dap.launchFromProgram store program stopOnEntry breakpoints stmtSpans
+    Dap.launchFromProgramInfo store programInfo stopOnEntry breakpoints
   updateStore store
   pure response
 
@@ -118,17 +116,8 @@ def dapInitialize (_params : InitializeParams) : RequestM (RequestTask Initializ
 @[server_rpc_method]
 def dapLaunch (params : LaunchParams) : RequestM (RequestTask LaunchResponse) :=
   RequestM.pureTask do
-    let launchProgram : Except String (Program × Array StmtSpan) := do
-      match params.programInfo?, params.program? with
-      | some info, _ =>
-        let info ← info.validate
-        pure (info.program, info.stmtSpans)
-      | none, some program =>
-        pure (program, #[])
-      | none, none =>
-        throw "Invalid launch payload: expected `programInfo` (preferred) or `program`."
-    let (program, stmtSpans) ← runCoreResult launchProgram
-    launchFromProgram program params.stopOnEntry params.breakpoints stmtSpans
+    let info ← runCoreResult params.programInfo.validate
+    launchFromProgramInfo info params.stopOnEntry params.breakpoints
 
 @[server_rpc_method]
 def dapLaunchMain (params : LaunchMainParams) : RequestM (RequestTask LaunchResponse) := do
@@ -144,11 +133,7 @@ def dapLaunchMain (params : LaunchMainParams) : RequestM (RequestTask LaunchResp
             params.entryPoint
             (moduleName? := some doc.meta.mod)
     let launchProgram ← runCoreResult launchProgramResult
-    launchFromProgram
-      launchProgram.program
-      params.stopOnEntry
-      params.breakpoints
-      launchProgram.stmtSpans
+    launchFromProgramInfo launchProgram.programInfo params.stopOnEntry params.breakpoints
 
 @[server_rpc_method]
 def dapSetBreakpoints (params : SetBreakpointsParams) :
@@ -169,6 +154,22 @@ def dapNext (params : SessionParams) : RequestM (RequestTask ControlResponse) :=
   RequestM.pureTask do
     let store ← dapSessionStoreRef.get
     let (store, response) ← runCoreResult <| Dap.next store params.sessionId
+    updateStore store
+    pure response
+
+@[server_rpc_method]
+def dapStepIn (params : SessionParams) : RequestM (RequestTask ControlResponse) :=
+  RequestM.pureTask do
+    let store ← dapSessionStoreRef.get
+    let (store, response) ← runCoreResult <| Dap.stepIn store params.sessionId
+    updateStore store
+    pure response
+
+@[server_rpc_method]
+def dapStepOut (params : SessionParams) : RequestM (RequestTask ControlResponse) :=
+  RequestM.pureTask do
+    let store ← dapSessionStoreRef.get
+    let (store, response) ← runCoreResult <| Dap.stepOut store params.sessionId
     updateStore store
     pure response
 

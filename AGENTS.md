@@ -26,13 +26,13 @@ Run these after meaningful changes touching Lean or VS Code codepaths.
 - Keep execution semantics in `Dap/Lang/Eval.lean` and `Dap/Debugger/Session.lean`.
 - Keep debugger/session semantics in `Dap/Debugger/Core.lean` (single source of truth).
 - Treat `ProgramInfo` as the canonical program representation across debugger flows.
-- Keep `Program` support as compatibility/input convenience (`Program -> ProgramInfo` with empty spans).
+- `Program` is function-only (`functions : Array FuncDef`) with required `main` entrypoint.
 - Treat transports as adapters only:
   - Lean RPC adapter logic in `Dap/DAP/Server.lean`
   - StdIO DAP adapter logic in `Dap/DAP/Stdio.lean`
 - Implement new debugger behavior in `Dap/Debugger/Core.lean` first, then wire transports.
 - Avoid duplicating protocol/state logic across adapters.
-- Keep source mapping consistent (statement index <-> source lines) and clearly document line-base assumptions.
+- Keep source mapping consistent (function + statement line <-> source lines) and clearly document line-base assumptions.
 
 ## Coding conventions
 - Prefer simplicity and readability over performance-oriented complexity.
@@ -41,8 +41,9 @@ Run these after meaningful changes touching Lean or VS Code codepaths.
 - Keep sample/demo declarations in `examples/Main.lean` as canonical fixtures.
 - When adding new launch modes, update both docs and tests.
 - Keep `mainProgram` as the default user entrypoint.
-- Prefer `ProgramInfo`-first APIs and flows; avoid adding new `Program`-only paths.
-- Use `dap%[...]` as the single DSL elaborator; it should produce `ProgramInfo`.
+- Use `ProgramInfo`-only launch/export flows.
+- Use `dap%[...]` as the single DSL elaborator; it should produce `ProgramInfo` with function-aware locations.
+- `dap%[...]` must be function-only and include `main()` with zero parameters.
 
 ## Testing split
 - Core functional tests should target `Dap/Debugger/Core.lean` APIs directly.
@@ -53,5 +54,5 @@ Run these after meaningful changes touching Lean or VS Code codepaths.
 - Any behavior duplicated between `Dap/DAP/Server.lean` and `Dap/DAP/Stdio.lean` that belongs in `Dap/Debugger/Core.lean`?
 - Any hardcoded declaration/entrypoint list that should be generalized?
 - Any duplicate decode/source-mapping logic that can drift from syntax/data definitions?
-- Are breakpoints/stack lines correctly mapped for both plain `Program` and `ProgramInfo`?
+- Are breakpoints/stack lines correctly mapped for all frames/functions via `ProgramInfo`?
 - Are lifecycle events (`initialized`, `stopped`, `continued`, `terminated`) emitted in valid order?

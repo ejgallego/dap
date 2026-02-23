@@ -12,26 +12,27 @@ namespace Dap.Lang.Examples
 
 open Dap
 
-def sampleProgramInfo : ProgramInfo := dap%[
-  let x := 6,
-  let y := 3,
-  let z := 4,
-  let sum := add x y,
-  let prod := mul sum y,
-  let quot := div prod x
+def mainProgram : ProgramInfo := dap%[
+  def bump(x) := {
+    let one := 1,
+    let out := add x one,
+    return out
+  },
+  def scaleAndShift(x, factor) := {
+    let scaled := mul x factor,
+    let shift := 2,
+    let out := add scaled shift,
+    return out
+  },
+  def main() := {
+    let seed := 5,
+    let factor := 3,
+    let bumped := call bump(seed),
+    let out := call scaleAndShift(bumped, factor)
+  }
 ]
 
-def mainProgram : Program :=
-  sampleProgramInfo
-
-def mainProgramInfo : ProgramInfo :=
-  sampleProgramInfo
-
-def sampleProgram : Program :=
-  mainProgram
-
-def sampleFinalContext : Except EvalError Context :=
-  run mainProgram
+#eval run mainProgram
 
 def sampleTraceProps : TraceWidgetProps :=
   match traceWidgetProps mainProgram with

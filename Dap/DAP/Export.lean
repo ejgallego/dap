@@ -14,7 +14,7 @@ open Lean
 namespace Dap.Export
 
 structure CliOptions where
-  decl : String := "mainProgramInfo"
+  decl : String := "mainProgram"
   out : System.FilePath := System.FilePath.mk ".dap/programInfo.generated.json"
   pretty : Bool := true
   deriving Inhabited
@@ -24,11 +24,9 @@ def usage : String := String.intercalate "\n"
     "",
     "Export a DAP payload from a Lean declaration.",
     "",
-    "--decl may point to either:",
-    "  - Dap.ProgramInfo (preferred, preserves spans), or",
-    "  - Dap.Program (exported as ProgramInfo with empty `located`).",
+    "--decl must point to a Dap.ProgramInfo declaration.",
     "",
-    "Default: --decl mainProgramInfo",
+    "Default: --decl mainProgram",
     "Name resolution for unqualified names tries:",
     "  1) <name>",
     "  2) Main.<name>",
@@ -55,17 +53,13 @@ private def parseArgs : CliOptions → List String → Except String CliOptions
 private def normalizeDeclName (raw : String) : String :=
   raw.trimAscii.toString
 
-private unsafe def evalProgramInfoOrProgram
+private unsafe def evalProgramInfo
     (env : Environment) (opts : Options) (decl : Name) : Except String ProgramInfo := do
   match env.evalConstCheck ProgramInfo opts ``Dap.ProgramInfo decl with
   | .ok info =>
     info.validate
   | .error infoErr =>
-    match env.evalConstCheck Program opts ``Dap.Program decl with
-    | .ok program =>
-      pure { program, located := #[] }
-    | .error programErr =>
-      throw s!"Declaration '{decl}' is neither Dap.ProgramInfo nor Dap.Program.\nProgramInfo error: {infoErr}\nProgram error: {programErr}"
+    throw s!"Declaration '{decl}' is not Dap.ProgramInfo.\nProgramInfo error: {infoErr}"
 
 private def loadProgramInfoFromDecl (rawDecl : String) : IO ProgramInfo := do
   let sysroot ← Lean.findSysroot
@@ -84,7 +78,7 @@ private def loadProgramInfoFromDecl (rawDecl : String) : IO ProgramInfo := do
     | none =>
       let attempted := Dap.renderCandidateDecls candidates
       throw <| IO.userError s!"Could not resolve declaration '{rawDecl}'. Tried: {attempted}"
-  match unsafe evalProgramInfoOrProgram env opts resolved with
+  match unsafe evalProgramInfo env opts resolved with
   | .ok info => pure info
   | .error err => throw <| IO.userError err
 

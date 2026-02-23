@@ -11,8 +11,11 @@ open Lean
 
 namespace Dap.Tests
 
+private def mkProgram (mainBody : Array Stmt) (helpers : Array FuncDef := #[]) : Program :=
+  { functions := #[{ name := Program.mainName, params := #[], body := mainBody }] ++ helpers }
+
 def testRunProgram : IO Unit := do
-  let program : Program :=
+  let program := mkProgram
     #[
       Stmt.letConst "a" 10,
       Stmt.letConst "b" 7,
@@ -28,15 +31,84 @@ def testRunProgram : IO Unit := do
     assertSomeEq "sum value" (ctx.lookup? "sum") 17
 
 def testUnboundVariable : IO Unit := do
-  let program : Program :=
-    #[
-      Stmt.letBin "z" .add "x" "y"
-    ]
+  let program := mkProgram #[Stmt.letBin "z" .add "x" "y"]
   match run program with
   | .ok _ =>
     throw <| IO.userError "testUnboundVariable failed: expected an error"
   | .error err =>
     assertEq "unbound variable error" err (.unboundVar "x")
+
+def testRunFunctionCallProgram : IO Unit := do
+  let scaleAndShift : FuncDef :=
+    { name := "scaleAndShift"
+      params := #["x", "y"]
+      body :=
+        #[
+          Stmt.letBin "prod" .mul "x" "y",
+          Stmt.letConst "shift" 5,
+          Stmt.letBin "out" .add "prod" "shift",
+          .return_ "out"
+        ] }
+  let program := mkProgram
+    #[
+      Stmt.letConst "a" 6,
+      Stmt.letConst "b" 4,
+      Stmt.letCall "res" "scaleAndShift" #["a", "b"]
+    ]
+    #[scaleAndShift]
+  match run program with
+  | .error err =>
+    throw <| IO.userError s!"testRunFunctionCallProgram failed: {err}"
+  | .ok ctx =>
+    assertEq "function call final pc" ctx.pc program.size
+    assertSomeEq "function call result" (ctx.lookup? "res") 29
+
+def testUnknownFunctionCall : IO Unit := do
+  let program := mkProgram
+    #[
+      Stmt.letConst "x" 1,
+      Stmt.letCall "y" "missing" #["x"]
+    ]
+  match run program with
+  | .ok _ =>
+    throw <| IO.userError "testUnknownFunctionCall failed: expected an error"
+  | .error err =>
+    assertEq "unknown function error" err (.unknownFunction "missing")
+
+def testArityMismatch : IO Unit := do
+  let inc : FuncDef :=
+    { name := "inc"
+      params := #["x"]
+      body := #[Stmt.letConst "one" 1, Stmt.letBin "out" .add "x" "one", .return_ "out"] }
+  let program := mkProgram
+    #[
+      Stmt.letConst "x" 1,
+      Stmt.letConst "y" 2,
+      Stmt.letCall "z" "inc" #["x", "y"]
+    ]
+    #[inc]
+  match run program with
+  | .ok _ =>
+    throw <| IO.userError "testArityMismatch failed: expected an error"
+  | .error err =>
+    assertEq "arity mismatch error" err (.arityMismatch "inc" 1 2)
+
+def testMissingReturn : IO Unit := do
+  let bad : FuncDef :=
+    { name := "bad"
+      params := #["x"]
+      body := #[Stmt.letConst "tmp" 1] }
+  let program := mkProgram
+    #[
+      Stmt.letConst "x" 2,
+      Stmt.letCall "out" "bad" #["x"]
+    ]
+    #[bad]
+  match run program with
+  | .ok _ =>
+    throw <| IO.userError "testMissingReturn failed: expected an error"
+  | .error err =>
+    assertEq "missing return error" err (.missingReturn "bad")
 
 def testHistoryCursorHelpers : IO Unit := do
   let items : Array Int := #[10, 20, 30]
@@ -49,7 +121,7 @@ def testHistoryCursorHelpers : IO Unit := do
   assertEq "history jump clamps" (History.jumpCursor items 100) 2
 
 def testTraceShape : IO Unit := do
-  let program : Program :=
+  let program := mkProgram
     #[
       Stmt.letConst "x" 1,
       Stmt.letConst "y" 2,
@@ -72,7 +144,7 @@ private def backN : Nat → Explorer → Explorer
   | n + 1, explorer => backN n (Explorer.back explorer)
 
 def testExplorerNavigation : IO Unit := do
-  let program : Program :=
+  let program := mkProgram
     #[
       Stmt.letConst "u" 9,
       Stmt.letConst "v" 3,
@@ -91,7 +163,7 @@ def testExplorerNavigation : IO Unit := do
     assertEq "jump to 1" mid.cursor 1
 
 def testWidgetProps : IO Unit := do
-  let program : Program :=
+  let program := mkProgram
     #[
       Stmt.letConst "x" 2,
       Stmt.letConst "y" 8,
@@ -106,7 +178,7 @@ def testWidgetProps : IO Unit := do
     assertEq "widget last pc" ((props.states[props.states.size - 1]?.map (·.pc)).getD 0) program.size
 
 def testDebugSessionContinueAndBreakpoints : IO Unit := do
-  let program : Program :=
+  let program := mkProgram
     #[
       Stmt.letConst "x" 1,
       Stmt.letConst "y" 2,
@@ -117,7 +189,7 @@ def testDebugSessionContinueAndBreakpoints : IO Unit := do
   | .error err =>
     throw <| IO.userError s!"testDebugSessionContinueAndBreakpoints failed to launch: {err}"
   | .ok session =>
-    let session := session.setBreakpoints #[3]
+    let session := session.setBreakpoints #[{ func := Program.mainName, stmtLine := 3 }]
     let (stopped, reason) ←
       match session.initialStop (stopOnEntry := false) with
       | .ok value => pure value
@@ -134,7 +206,7 @@ def testDebugSessionContinueAndBreakpoints : IO Unit := do
     assertEq "continue end cursor" done.cursor done.maxCursor
 
 def testDebugSessionStepBack : IO Unit := do
-  let program : Program :=
+  let program := mkProgram
     #[
       Stmt.letConst "a" 4,
       Stmt.letConst "b" 5
@@ -160,75 +232,155 @@ def testDebugSessionStepBack : IO Unit := do
     assertEq "stepBack replay reason" replayReason .step
     assertEq "stepBack replay current pc" replayed.currentPc forwarded.currentPc
 
-def testDslProgram : IO Unit := do
-  let program : Program := dap%[
-    let x := 6,
-    let y := 7,
-    let z := add x y
+def testDebugCoreStepInOut : IO Unit := do
+  let info : ProgramInfo := dap%[
+    def inner(x) := {
+      let two := 2,
+      let out := mul x two,
+      return out
+    },
+    def outer(a) := {
+      let mid := call inner(a),
+      let out := add mid a,
+      return out
+    },
+    def main() := {
+      let n := 3,
+      let out := call outer(n),
+      let final := add out n
+    }
   ]
-  match run program with
+  let store0 : SessionStore := {}
+  let (store1, launch) ← expectCore "step in/out launch" <| Dap.launchFromProgramInfo store0 info true #[]
+  assertEq "step in/out launch reason" launch.stopReason "entry"
+  let sessionId := launch.sessionId
+  let (store2, _) ← expectCore "step in/out main step 1" <| Dap.stepIn store1 sessionId
+  let (store3, _) ← expectCore "step in/out enter outer" <| Dap.stepIn store2 sessionId
+  let stackOuter ← expectCore "step in/out stack outer" <| Dap.stackTrace store3 sessionId
+  assertEq "step in/out depth after entering outer" stackOuter.totalFrames 2
+  assertTrue "step in/out top frame is outer"
+    ((stackOuter.stackFrames[0]?.map (·.name.contains "outer")).getD false)
+  let (store4, _) ← expectCore "step in/out enter inner" <| Dap.stepIn store3 sessionId
+  let stackInner ← expectCore "step in/out stack inner" <| Dap.stackTrace store4 sessionId
+  assertEq "step in/out depth after entering inner" stackInner.totalFrames 3
+  assertTrue "step in/out top frame is inner"
+    ((stackInner.stackFrames[0]?.map (·.name.contains "inner")).getD false)
+  let (store5, outInner) ← expectCore "step in/out return from inner" <| Dap.stepOut store4 sessionId
+  assertEq "step in/out return from inner reason" outInner.stopReason "step"
+  assertEq "step in/out return from inner terminated" outInner.terminated false
+  let stackAfterInner ← expectCore "step in/out stack after inner" <| Dap.stackTrace store5 sessionId
+  assertEq "step in/out depth after inner return" stackAfterInner.totalFrames 2
+  assertTrue "step in/out top frame returns to outer"
+    ((stackAfterInner.stackFrames[0]?.map (·.name.contains "outer")).getD false)
+  let (store6, outOuter) ← expectCore "step in/out return from outer" <| Dap.stepOut store5 sessionId
+  assertEq "step in/out return from outer reason" outOuter.stopReason "step"
+  assertEq "step in/out return from outer terminated" outOuter.terminated false
+  let stackAfterOuter ← expectCore "step in/out stack after outer" <| Dap.stackTrace store6 sessionId
+  assertEq "step in/out depth after outer return" stackAfterOuter.totalFrames 1
+  assertTrue "step in/out top frame returns to main"
+    ((stackAfterOuter.stackFrames[0]?.map (·.name.contains "main")).getD false)
+  let (_store7, outMain) ← expectCore "step in/out return from main" <| Dap.stepOut store6 sessionId
+  assertEq "step in/out return from main reason" outMain.stopReason "terminated"
+  assertEq "step in/out return from main terminated" outMain.terminated true
+
+def testDslProgram : IO Unit := do
+  let info : ProgramInfo := dap%[
+    def main() := {
+      let x := 6,
+      let y := 7,
+      let z := add x y
+    }
+  ]
+  match run info.program with
   | .error err =>
     throw <| IO.userError s!"testDslProgram failed: {err}"
   | .ok ctx =>
     assertSomeEq "dsl result" (ctx.lookup? "z") 13
 
 def testDslNegativeLiteral : IO Unit := do
-  let program : Program := dap%[
-    let x := -6,
-    let y := 2,
-    let z := add x y
+  let info : ProgramInfo := dap%[
+    def main() := {
+      let x := -6,
+      let y := 2,
+      let z := add x y
+    }
   ]
-  match run program with
+  match run info.program with
   | .error err =>
     throw <| IO.userError s!"testDslNegativeLiteral failed: {err}"
   | .ok ctx =>
     assertSomeEq "dsl negative literal result" (ctx.lookup? "z") (-4)
 
+def testDslFunctionCall : IO Unit := do
+  let info : ProgramInfo := dap%[
+    def addMul(x, y) := {
+      let sum := add x y,
+      let out := mul sum y,
+      return out
+    },
+    def main() := {
+      let a := 2,
+      let b := 5,
+      let z := call addMul(a, b)
+    }
+  ]
+  match run info.program with
+  | .error err =>
+    throw <| IO.userError s!"testDslFunctionCall failed: {err}"
+  | .ok ctx =>
+    assertSomeEq "dsl function call result" (ctx.lookup? "z") 35
+
 def testDslProgramInfo : IO Unit := do
   let info : ProgramInfo := dap%[
-    let a := 1,
-    let b := 2,
-    let c := mul a b
+    def main() := {
+      let a := 1,
+      let b := 2,
+      let c := mul a b
+    }
   ]
   assertEq "programInfo size" info.program.size 3
   assertEq "programInfo located size" info.located.size 3
   let line0 := (info.located[0]?.map (·.span.startLine)).getD 0
-  assertSomeEq "line maps to first stmt" (info.lineToStmtIdx? line0) 0
-  assertTrue "statement spans have valid line range"
-    (info.located.all fun located => located.span.startLine ≤ located.span.endLine)
-  let firstStmtLine := (ProgramInfo.sourceLineToStmtLine? info.stmtSpans line0).getD 0
-  assertEq "source->stmt line mapping" firstStmtLine 1
-  let firstSourceLine := ProgramInfo.stmtLineToSourceLine info.stmtSpans 1
-  assertEq "stmt->source line mapping" firstSourceLine line0
+  let loc0 := (info.sourceLineToLocation? line0).getD default
+  assertEq "source line maps to main" loc0.func Program.mainName
+  assertEq "source line maps to first stmt" loc0.stmtLine 1
+  let sourceLine := info.locationToSourceLine { func := Program.mainName, stmtLine := 1 }
+  assertEq "location->source line mapping" sourceLine line0
 
 def testProgramInfoValidation : IO Unit := do
   let stmt0 := Stmt.letConst "x" 1
   let stmt1 := Stmt.letConst "y" 2
   let span : StmtSpan := { startLine := 1, startColumn := 0, endLine := 1, endColumn := 10 }
+  let missingMain : ProgramInfo :=
+    { program := { functions := #[{ name := "helper", params := #[], body := #[stmt0] }] }
+      located := #[{ func := "helper", stmtLine := 1, stmt := stmt0, span }] }
+  match missingMain.validate with
+  | .ok _ =>
+    throw <| IO.userError "testProgramInfoValidation should reject missing main"
+  | .error err =>
+    assertTrue "missing main error mentions main" (err.contains "main")
   let badInfo : ProgramInfo :=
-    { program := #[stmt0, stmt1]
-      located := #[{ stmt := stmt0, span }] }
+    { program := mkProgram #[stmt0, stmt1]
+      located := #[{ func := Program.mainName, stmtLine := 1, stmt := stmt0, span }] }
   match badInfo.validate with
   | .ok _ =>
     throw <| IO.userError "testProgramInfoValidation should reject mismatched ProgramInfo"
   | .error err =>
     assertTrue "programInfo mismatch error mentions located size" (err.contains "located")
-  let compatInfo : ProgramInfo := { program := #[stmt0, stmt1], located := #[] }
-  match compatInfo.validate with
-  | .ok _ => pure ()
-  | .error err =>
-    throw <| IO.userError s!"ProgramInfo compatibility mode should validate: {err}"
 
 def testDebugCoreFlow : IO Unit := do
-  let program : Program := dap%[
-    let x := 5,
-    let y := 7,
-    let z := add x y
+  let info : ProgramInfo := dap%[
+    def main() := {
+      let x := 5,
+      let y := 7,
+      let z := add x y
+    }
   ]
+  let bpLine := info.locationToSourceLine { func := Program.mainName, stmtLine := 2 }
   let store0 : SessionStore := {}
-  let (store1, launch) ← expectCore "core launch" <| Dap.launchFromProgram store0 program false #[2]
+  let (store1, launch) ← expectCore "core launch" <| Dap.launchFromProgramInfo store0 info false #[bpLine]
   assertEq "core launch stopReason" launch.stopReason "breakpoint"
-  assertEq "core launch line" launch.line 2
+  assertEq "core launch line" launch.line bpLine
   let sessionId := launch.sessionId
   let vars1 ← expectCore "core vars" <| Dap.variables store1 sessionId 1
   assertTrue "core vars contain x binding"
@@ -245,12 +397,49 @@ def testDebugCoreFlow : IO Unit := do
   | .error _ =>
     pure ()
 
-def testDebugCoreTerminatedGuards : IO Unit := do
-  let program : Program := dap%[
-    let x := 1
+def testDebugCoreStackFrames : IO Unit := do
+  let info : ProgramInfo := dap%[
+    def addMul(x, y) := {
+      let sum := add x y,
+      let out := mul sum y,
+      return out
+    },
+    def main() := {
+      let a := 2,
+      let b := 3,
+      let z := call addMul(a, b)
+    }
   ]
   let store0 : SessionStore := {}
-  let (store1, launch) ← expectCore "terminated guards launch" <| Dap.launchFromProgram store0 program false #[]
+  let (store1, launch) ← expectCore "stack frames launch" <| Dap.launchFromProgramInfo store0 info true #[]
+  assertEq "stack frames launch stopReason" launch.stopReason "entry"
+  let sessionId := launch.sessionId
+  let (store2, _) ← expectCore "stack frames next 1" <| Dap.next store1 sessionId
+  let (store3, _) ← expectCore "stack frames next 2" <| Dap.next store2 sessionId
+  let (store4, _) ← expectCore "stack frames next call" <| Dap.next store3 sessionId
+  let stack ← expectCore "stack frames stackTrace" <| Dap.stackTrace store4 sessionId
+  assertEq "stack frames total" stack.totalFrames 2
+  let top := stack.stackFrames[0]?.getD default
+  let caller := stack.stackFrames[1]?.getD default
+  assertTrue "stack frames top is callee" (top.name.contains "addMul")
+  assertTrue "stack frames caller is main" (caller.name.contains "main")
+  let scopesTop ← expectCore "stack frames scopes top" <| Dap.scopes store4 sessionId 0
+  assertEq "stack frames top scope count" scopesTop.scopes.size 1
+  let varsTop ← expectCore "stack frames vars top" <| Dap.variables store4 sessionId 1
+  assertTrue "stack frames top vars include x"
+    (varsTop.variables.any fun v => v.name == "x" && v.value == "2")
+  let varsCaller ← expectCore "stack frames vars caller" <| Dap.variables store4 sessionId 2
+  assertTrue "stack frames caller vars include a"
+    (varsCaller.variables.any fun v => v.name == "a" && v.value == "2")
+
+def testDebugCoreTerminatedGuards : IO Unit := do
+  let info : ProgramInfo := dap%[
+    def main() := {
+      let x := 1
+    }
+  ]
+  let store0 : SessionStore := {}
+  let (store1, launch) ← expectCore "terminated guards launch" <| Dap.launchFromProgramInfo store0 info false #[]
   assertEq "terminated guards launch terminated" launch.terminated true
   let sessionId := launch.sessionId
   let nextAfterTerminated := Dap.next store1 sessionId
@@ -266,76 +455,73 @@ def testDebugCoreTerminatedGuards : IO Unit := do
   | .error err =>
     assertTrue "setBreakpoints terminated error mentions state" (err.contains "terminated")
 
-def testDebugCoreRejectsIncompatibleStmtSpans : IO Unit := do
-  let program : Program :=
-    #[
-      Stmt.letConst "x" 1,
-      Stmt.letConst "y" 2
-    ]
-  let stmtSpans : Array StmtSpan :=
-    #[{ startLine := 1, startColumn := 0, endLine := 1, endColumn := 10 }]
-  let launch := Dap.launchFromProgram (store := {}) program true #[] stmtSpans
+def testDebugCoreRejectsInvalidProgramInfo : IO Unit := do
+  let stmt := Stmt.letConst "x" 1
+  let span : StmtSpan := { startLine := 1, startColumn := 0, endLine := 1, endColumn := 10 }
+  let invalid : ProgramInfo :=
+    { program := { functions := #[{ name := "helper", params := #[], body := #[stmt] }] }
+      located := #[{ func := "helper", stmtLine := 1, stmt, span }] }
+  let launch := Dap.launchFromProgramInfo (store := {}) invalid true #[]
   match launch with
   | .ok _ =>
-    throw <| IO.userError "launch should fail with incompatible statement spans"
+    throw <| IO.userError "launch should fail with invalid ProgramInfo"
   | .error err =>
-    assertTrue "incompatible span error mentions statement spans" (err.contains "statement spans")
+    assertTrue "invalid program info launch error mentions main" (err.contains "main")
 
 def testResolveCandidateDeclNames : IO Unit := do
-  let unqualified := Dap.candidateDeclNames `mainProgramInfo (moduleName? := some `Main)
+  let unqualified := Dap.candidateDeclNames `mainProgram (moduleName? := some `Main)
   assertEq "candidate names include local module and examples"
     unqualified
-    #[`mainProgramInfo, `Main.mainProgramInfo, `Dap.Lang.Examples.mainProgramInfo]
-  let dedup := Dap.candidateDeclNames `mainProgramInfo (moduleName? := some `Dap.Lang.Examples)
+    #[`mainProgram, `Main.mainProgram, `Dap.Lang.Examples.mainProgram]
+  let dedup := Dap.candidateDeclNames `mainProgram (moduleName? := some `Dap.Lang.Examples)
   assertEq "candidate names are deduplicated"
     dedup
-    #[`mainProgramInfo, `Dap.Lang.Examples.mainProgramInfo]
-  let qualified := Dap.candidateDeclNames `Main.mainProgramInfo (moduleName? := some `Main)
-  assertEq "qualified names stay unchanged" qualified #[`Main.mainProgramInfo]
+    #[`mainProgram, `Dap.Lang.Examples.mainProgram]
+  let qualified := Dap.candidateDeclNames `Main.mainProgram (moduleName? := some `Main)
+  assertEq "qualified names stay unchanged" qualified #[`Main.mainProgram]
 
-def testRpcLaunchParamsProgramInfoFirst : IO Unit := do
+def testRpcLaunchParamsProgramInfoOnly : IO Unit := do
   let info : ProgramInfo := dap%[
-    let x := 1
+    def main() := {
+      let x := 1
+    }
   ]
-  let infoParams : Dap.Server.LaunchParams :=
-    { programInfo? := some info
+  let params : Dap.Server.LaunchParams :=
+    { programInfo := info
       stopOnEntry := false
       breakpoints := #[1] }
-  let decodedInfoParams ←
-    match (fromJson? (toJson infoParams) : Except String Dap.Server.LaunchParams) with
+  let decoded ←
+    match (fromJson? (toJson params) : Except String Dap.Server.LaunchParams) with
     | .ok params => pure params
     | .error err =>
-      throw <| IO.userError s!"testRpcLaunchParamsProgramInfoFirst decode info params failed: {err}"
-  assertTrue "launch params keep programInfo payload" decodedInfoParams.programInfo?.isSome
-  assertEq "launch params leave program compatibility empty by default"
-    decodedInfoParams.program?.isSome false
-  let programParams : Dap.Server.LaunchParams :=
-    { program? := some info.program
-      stopOnEntry := true }
-  let decodedProgramParams ←
-    match (fromJson? (toJson programParams) : Except String Dap.Server.LaunchParams) with
-    | .ok params => pure params
-    | .error err =>
-      throw <| IO.userError s!"testRpcLaunchParamsProgramInfoFirst decode program params failed: {err}"
-  assertTrue "launch params keep program compatibility payload" decodedProgramParams.program?.isSome
+      throw <| IO.userError s!"testRpcLaunchParamsProgramInfoOnly decode failed: {err}"
+  assertEq "launch params preserve breakpoints" decoded.breakpoints #[1]
+  assertEq "launch params preserve stopOnEntry" decoded.stopOnEntry false
 
 def runCoreTests : IO Unit := do
   testRunProgram
   testUnboundVariable
+  testRunFunctionCallProgram
+  testUnknownFunctionCall
+  testArityMismatch
+  testMissingReturn
   testHistoryCursorHelpers
   testTraceShape
   testExplorerNavigation
   testWidgetProps
   testDebugSessionContinueAndBreakpoints
   testDebugSessionStepBack
+  testDebugCoreStepInOut
   testDslProgram
   testDslNegativeLiteral
+  testDslFunctionCall
   testDslProgramInfo
   testProgramInfoValidation
   testDebugCoreFlow
+  testDebugCoreStackFrames
   testDebugCoreTerminatedGuards
-  testDebugCoreRejectsIncompatibleStmtSpans
+  testDebugCoreRejectsInvalidProgramInfo
   testResolveCandidateDeclNames
-  testRpcLaunchParamsProgramInfoFirst
+  testRpcLaunchParamsProgramInfoOnly
 
 end Dap.Tests

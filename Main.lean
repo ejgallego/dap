@@ -14,7 +14,7 @@ private def renderBindings (ctx : Context) : String :=
   String.intercalate ", " parts
 
 def main : IO Unit := do
-  match Dap.Lang.Examples.sampleFinalContext with
+  match run Dap.Lang.Examples.mainProgram.program with
   | .error err =>
     IO.eprintln s!"Evaluation failed: {err}"
   | .ok ctx =>
