@@ -6,8 +6,7 @@ Author: Emilio J. Gallego Arias
 
 import Lean
 import Dap.Lang.Ast
-import Dap.DAP.Resolve
-import examples.Main
+import Dap.DAP.ProgramInfoLoader
 
 open Lean
 
@@ -53,34 +52,8 @@ private def parseArgs : CliOptions → List String → Except String CliOptions
 private def normalizeDeclName (raw : String) : String :=
   raw.trimAscii.toString
 
-private unsafe def evalProgramInfo
-    (env : Environment) (opts : Options) (decl : Name) : Except String ProgramInfo := do
-  match env.evalConstCheck ProgramInfo opts ``Dap.ProgramInfo decl with
-  | .ok info =>
-    info.validate
-  | .error infoErr =>
-    throw s!"Declaration '{decl}' is not Dap.ProgramInfo.\nProgramInfo error: {infoErr}"
-
 private def loadProgramInfoFromDecl (rawDecl : String) : IO ProgramInfo := do
-  let sysroot ← Lean.findSysroot
-  Lean.initSearchPath sysroot [System.FilePath.mk ".lake/build/lib/lean"]
-  let declName ←
-    match Dap.parseDeclName? rawDecl with
-    | some n => pure n
-    | none => throw <| IO.userError s!"Invalid declaration name '{rawDecl}'"
-  let env ← Dap.importProjectEnv
-  let opts : Options := {}
-  let candidates := Dap.candidateDeclNames declName (moduleName? := some `Main)
-  let resolved? := Dap.resolveFirstDecl? env candidates
-  let resolved ←
-    match resolved? with
-    | some n => pure n
-    | none =>
-      let attempted := Dap.renderCandidateDecls candidates
-      throw <| IO.userError s!"Could not resolve declaration '{rawDecl}'. Tried: {attempted}"
-  match unsafe evalProgramInfo env opts resolved with
-  | .ok info => pure info
-  | .error err => throw <| IO.userError err
+  Dap.loadProgramInfoFromDecl rawDecl
 
 private def renderJson (programInfo : ProgramInfo) (pretty : Bool) : String :=
   let json := toJson programInfo

@@ -149,6 +149,7 @@ Notes:
 - `programInfo` is required to launch.
 - With the provided auto-export launch setup, you usually do not need to set `programInfo` manually.
 - Launch fails if neither inline `programInfo` nor valid `.dap/programInfo.generated.json` is available.
+- Debug input is produced from compiled `.olean` artifacts; save changes and rebuild/export before launching to avoid stale state.
 - `source` is optional and controls displayed source path in stack frames.
 - `toydapPath` (optional, `string`): explicit adapter binary path.
 - If `toydapPath` is omitted, the extension tries `${workspaceFolder}/.lake/build/bin/toydap`, then `toydap` from `PATH`.

@@ -9,6 +9,7 @@ import Lean.Data.Lsp.Communication
 import Dap.Debugger.Core
 import Dap.DAP.Launch
 import Dap.DAP.Capabilities
+import Dap.DAP.ProgramInfoLoader
 
 open Lean
 
@@ -112,18 +113,35 @@ private def parseBreakpointLines (args : Json) : Array Nat :=
   | some breakpointsJson => parseBreakpointsArray breakpointsJson
   | none => #[]
 
-private def requireProgramInfo (args : Json) : IO ProgramInfo := do
-  let programInfoJson ←
-    match (args.getObjVal? "programInfo").toOption with
+private def decodeProgramInfoRef (json : Json) : Except String (String × String) := do
+  let moduleName ← json.getObjValAs? String "module"
+  let decl := (json.getObjValAs? String "decl").toOption.getD "mainProgram"
+  pure (moduleName, decl)
+
+private def requireProgramInfoFromRef (args : Json) : IO ProgramInfo := do
+  let refJson ←
+    match (args.getObjVal? "programInfoRef").toOption with
     | some json => pure json
     | none =>
       throw <| IO.userError
-        "launch requires 'programInfo' (a Dap.ProgramInfo JSON payload)."
-  match Dap.decodeProgramInfoJson programInfoJson with
-  | .ok programInfo =>
-    pure programInfo
-  | .error err =>
-    throw <| IO.userError err
+        "launch requires 'programInfo' (a Dap.ProgramInfo JSON payload) or 'programInfoRef' with 'module' and optional 'decl'."
+  let (moduleName, decl) ←
+    match decodeProgramInfoRef refJson with
+    | .ok value => pure value
+    | .error err =>
+      throw <| IO.userError s!"Invalid 'programInfoRef' payload: {err}"
+  Dap.loadProgramInfoFromModuleDecl moduleName decl
+
+private def requireProgramInfo (args : Json) : IO ProgramInfo := do
+  match (args.getObjVal? "programInfo").toOption with
+  | some programInfoJson =>
+    match Dap.decodeProgramInfoJson programInfoJson with
+    | .ok programInfo =>
+      pure programInfo
+    | .error err =>
+      throw <| IO.userError err
+  | none =>
+    requireProgramInfoFromRef args
 
 private def sourceJson? (sourcePath? : Option String) : Option Json := do
   let sourcePath ← sourcePath?

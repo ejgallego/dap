@@ -13,6 +13,7 @@ import Dap.Debugger.Session
 import Dap.Debugger.Core
 import Dap.DAP.Resolve
 import Dap.DAP.Launch
+import Dap.DAP.ProgramInfoLoader
 import Dap.DAP.Export
 import Dap.DAP.Capabilities
 import Dap.Widget.Types
