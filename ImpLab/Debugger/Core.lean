@@ -431,11 +431,20 @@ def stackTrace
     { stackFrames := fullFrames.extract start stop
       totalFrames := fullFrames.size }
 
+private def localsReference (frameId : Nat) : Nat :=
+  frameId * 2 + 1
+
+private def heapReference (frameId : Nat) : Nat :=
+  frameId * 2 + 2
+
 def scopes (store : SessionStore) (sessionId : Nat) (frameId : Nat := 0) : Except String ScopesResponse := do
   let data ← getSessionData store sessionId
   ensureControllable data sessionId
   if (stackFrameAt? data.session frameId).isSome then
-    pure { scopes := #[{ name := "locals", variablesReference := frameId + 1 }] }
+    pure
+      { scopes :=
+          #[ { name := "locals", variablesReference := localsReference frameId },
+             { name := "heap", variablesReference := heapReference frameId } ] }
   else
     pure { scopes := #[] }
 
@@ -447,14 +456,24 @@ def variables
   ensureControllable data sessionId
   if variablesReference = 0 then
     pure { variables := #[] }
-  else
-    let frameId := variablesReference - 1
+  else if variablesReference % 2 = 1 then
+    let frameId := (variablesReference - 1) / 2
     match stackFrameAt? data.session frameId with
     | none =>
       pure { variables := #[] }
     | some frame =>
       let variables :=
         frame.env.toArray.map fun (name, value) =>
+          { name, value := toString value : VariableView }
+      pure { variables }
+  else
+    let frameId := (variablesReference - 2) / 2
+    match stackFrameAt? data.session frameId with
+    | none =>
+      pure { variables := #[] }
+    | some _ =>
+      let variables :=
+        data.session.heapBindings.map fun (name, value) =>
           { name, value := toString value : VariableView }
       pure { variables }
 
