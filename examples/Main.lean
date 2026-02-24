@@ -13,6 +13,7 @@ namespace ImpLab.Lang.Examples
 open ImpLab
 
 def mainProgram : ProgramInfo := imp%[
+  global lastOut := 0,
   def bump(x) := {
     let one := 1,
     let out := add x one,
@@ -30,7 +31,9 @@ def mainProgram : ProgramInfo := imp%[
     let seed := 5,
     let factor := 3,
     let bumped := call bump(seed),
-    let out := call scaleAndShift(bumped, factor)
+    let out := call scaleAndShift(bumped, factor),
+    set lastOut := out,
+    let heapOut := get lastOut
   }
 ]
 
