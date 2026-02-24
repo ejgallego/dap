@@ -1,4 +1,4 @@
-# Lean Toy DAP Client (VS Code)
+# ImpLab Toy DAP Client (VS Code)
 
 This extension starts the standalone `toydap` debug adapter binary built from this repository.
 
@@ -30,7 +30,7 @@ Use debug type `lean-toy-dap`.
 - Optional source path shown in stack traces.
 
 Launch payload:
-- `programInfo`: `Dap.ProgramInfo` JSON payload.
+- `programInfo`: `ImpLab.ProgramInfo` JSON payload.
 - If omitted, the extension tries `${workspaceFolder}/.dap/programInfo.generated.json`.
 - The extension does not auto-load `client/programInfo.sample.json`; that file is only a reference shape.
 
@@ -42,13 +42,13 @@ Example:
 
 ```json
 {
-  "name": "Lean Toy DAP",
+  "name": "ImpLab Toy DAP",
   "type": "lean-toy-dap",
   "request": "launch",
   "source": "${file}",
   "toydapPath": "${workspaceFolder}/.lake/build/bin/toydap",
   "programInfo": {
-    "...": "Dap.ProgramInfo JSON"
+    "...": "ImpLab.ProgramInfo JSON"
   },
   "stopOnEntry": true
 }
@@ -58,7 +58,7 @@ For JSON payload shape, see `client/programInfo.sample.json`.
 You can also generate `ProgramInfo` JSON via:
 
 ```bash
-lake exe dap-export --decl mainProgram --out .dap/programInfo.generated.json
+lake exe dap-export --decl ImpLab.Lang.Examples.mainProgram --out .dap/programInfo.generated.json
 ```
 
 ## Supported DAP requests
