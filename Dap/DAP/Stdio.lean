@@ -8,6 +8,7 @@ import Lean
 import Lean.Data.Lsp.Communication
 import Dap.Debugger.Core
 import Dap.DAP.Launch
+import Dap.DAP.Capabilities
 
 open Lean
 
@@ -18,7 +19,7 @@ structure AdapterState where
   core : SessionStore := {}
   defaultSessionId? : Option Nat := none
   pendingBreakpoints : Array Nat := #[]
-  sourcePath? : Option String := none
+  sourcePathBySession : Std.HashMap Nat String := {}
   deriving Inhabited
 
 structure DapRequest where
@@ -168,9 +169,9 @@ private def requireSessionId (stRef : IO.Ref AdapterState) (args : Json) : IO Na
 private def handleInitialize (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)
     (req : DapRequest) : IO Unit := do
   sendResponse stdout stRef req <| Json.mkObj
-    [ ("supportsConfigurationDoneRequest", toJson true),
-      ("supportsStepBack", toJson true),
-      ("supportsRestartRequest", toJson false) ]
+    [ ("supportsConfigurationDoneRequest", toJson dapCapabilities.supportsConfigurationDoneRequest),
+      ("supportsStepBack", toJson dapCapabilities.supportsStepBack),
+      ("supportsRestartRequest", toJson dapCapabilities.supportsRestartRequest) ]
   sendEvent stdout stRef "initialized"
 
 private def handleLaunch (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)
@@ -188,11 +189,15 @@ private def handleLaunch (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)
     | .ok value => pure value
     | .error err => throw <| IO.userError err
   stRef.modify fun st =>
+    let sourcePathBySession :=
+      match sourcePath? with
+      | some sourcePath => st.sourcePathBySession.insert launch.sessionId sourcePath
+      | none => st.sourcePathBySession.erase launch.sessionId
     { st with
       core
       defaultSessionId? := some launch.sessionId
       pendingBreakpoints := activeBreakpoints
-      sourcePath? := sourcePath? }
+      sourcePathBySession }
   sendResponse stdout stRef req
   emitStopOrTerminate stdout stRef launch.stopReason launch.terminated
 
@@ -239,7 +244,7 @@ private def handleStackTrace (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterStat
     match Dap.stackTrace st.core sessionId startFrame levels with
     | .ok value => pure value
     | .error err => throw <| IO.userError err
-  let sourceField? := sourceJson? st.sourcePath?
+  let sourceField? := sourceJson? (st.sourcePathBySession.get? sessionId)
   let stackFrames := response.stackFrames.map fun frame =>
     let base :=
       [ ("id", toJson frame.id),
@@ -362,6 +367,10 @@ private def handleDisconnect (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterStat
     match targetSessionId? with
     | some sessionId => (Dap.disconnect st.core sessionId).1
     | none => st.core
+  let sourcePathBySession :=
+    match targetSessionId? with
+    | some sessionId => st.sourcePathBySession.erase sessionId
+    | none => st.sourcePathBySession
   let defaultSessionId? :=
     match st.defaultSessionId? with
     | some defaultSessionId =>
@@ -371,7 +380,7 @@ private def handleDisconnect (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterStat
         none
     | none =>
       none
-  stRef.modify fun st => { st with core, defaultSessionId? }
+  stRef.modify fun st => { st with core, defaultSessionId?, sourcePathBySession }
   sendResponse stdout stRef req
 
 private def handleRequest (stdout : IO.FS.Stream) (stRef : IO.Ref AdapterState)

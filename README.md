@@ -18,10 +18,10 @@ Lean 4 toy project for:
 - `examples/Main.lean`: sample program and precomputed widget props.
 - `Dap/Debugger/Session.lean`: pure debugger session model (breakpoints, continue, next, stepIn, stepOut, stepBack).
 - `Dap/Debugger/Core.lean`: session store + DAP-shaped pure core operations.
-- `Dap/DAP/Server.lean`: Lean server RPC endpoints implementing DAP-like operations.
+- `Dap/Widget/Server.lean`: Lean server RPC endpoints implementing DAP-like operations.
 - `Dap/DAP/Stdio.lean`: standalone DAP adapter implementation (native DAP protocol over stdio).
 - `Dap/Widget/Types.lean`: pure widget data model + trace-to-widget projection helpers.
-- `Dap/Widget/Server.lean`: widget props + `traceExplorerWidget`.
+- `Dap/Widget/UI.lean`: `traceExplorerWidget` module UI.
 - `Dap/DAP/Export.lean`: `dap-export` declaration loader/export logic.
 - `Test/Core.lean`: core/runtime/debugger tests.
 - `Test/Transport.lean`: DAP stdio transport lifecycle/framing tests.

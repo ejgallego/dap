@@ -4,9 +4,9 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Author: Emilio J. Gallego Arias
 -/
 
-import Dap.Widget.Server
+import Dap.Widget.UI
 import Dap.Lang.Dsl
-import Dap.DAP.Server
+import Dap.Widget.Server
 
 namespace Dap.Lang.Examples
 

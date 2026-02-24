@@ -14,7 +14,8 @@ import Dap.Debugger.Core
 import Dap.DAP.Resolve
 import Dap.DAP.Launch
 import Dap.DAP.Export
-import Dap.DAP.Server
+import Dap.DAP.Capabilities
 import Dap.Widget.Types
+import Dap.Widget.UI
 import Dap.Widget.Server
 import examples.Main
