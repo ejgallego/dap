@@ -2,6 +2,7 @@
 
 ## Scope
 Applies to work under `ImpLab/Debugger/*`, `app/ToyDap.lean`, `app/ExportMain.lean`, and debugger-focused tests.
+Active debugger backlog and priorities are tracked in `docs/debugger-roadmap.md`.
 
 ## Source of truth
 - Debugger behavior: `ImpLab/Debugger/Core.lean`

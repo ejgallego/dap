@@ -115,6 +115,11 @@ Registered in `ImpLab.Debugger.Widget.Server`:
 - Breakpoint verification and stack-frame/source mapping must remain function-aware.
 - `Program` stays function-only with required `main()`.
 
+## Roadmap
+
+Current debugger priorities and milestones:
+- `docs/debugger-roadmap.md`
+
 ## Tests
 
 ```bash

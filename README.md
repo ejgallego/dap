@@ -81,6 +81,7 @@ Language reference:
 ## Additional links
 
 - Debugger architecture and launch contract: `docs/debugger.md`
+- Debugger roadmap (active priorities): `docs/debugger-roadmap.md`
 - VS Code extension details: `client/README.md`
 - Agent instructions (global): `AGENTS.md`
 - Agent instructions (debugger-local): `ImpLab/Debugger/AGENTS.md`

@@ -28,3 +28,5 @@
 ## Subsystem-local instructions
 - Debugger-specific rules and review checklist live in:
   - `ImpLab/Debugger/AGENTS.md`
+- Debugger active work tracking lives in:
+  - `docs/debugger-roadmap.md`
