@@ -55,6 +55,8 @@ def props : TraceWidgetInitProps :=
 
 ## Documentation
 
+- Language DSL and semantics reference:
+  - `docs/language.md`
 - Debugger architecture, DAP flow, launch configuration, and transport details:
   - `docs/debugger.md`
 - VS Code extension details:

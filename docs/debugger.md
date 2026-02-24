@@ -14,8 +14,7 @@ This document contains debugger-specific architecture, launch flow, and protocol
   - `ImpLab/Debugger/Widget/Server.lean`
   - `ImpLab/Debugger/Widget/UI.lean`
   - `ImpLab/Debugger/Widget/Types.lean`
-- ProgramInfo loading/export:
-  - `ImpLab/Debugger/DAP/ProgramInfoLoader.lean`
+- ProgramInfo export:
   - `ImpLab/Debugger/DAP/Export.lean`
   - `app/ExportMain.lean`
 
@@ -26,6 +25,35 @@ This document contains debugger-specific architecture, launch flow, and protocol
 - Treat `ProgramInfo` as canonical across launch/debug/export.
 - Keep source mapping coherent (`func` + `stmtLine` <-> source line).
 - Preserve DAP payload shape stability and lifecycle ordering.
+
+## VS Code quick start
+
+1. Build Lean artifacts:
+
+```bash
+lake build
+```
+
+2. Install client dependencies (first time only):
+
+```bash
+cd client && npm i
+```
+
+3. Start the extension dev host:
+
+```bash
+code client
+```
+
+4. In that VS Code window, press `F5` and run one of:
+- `Run ImpLab Toy DAP Extension (watch)`
+- `Run ImpLab Toy DAP Extension (compile once)`
+
+5. In the Extension Development Host:
+- open this repository,
+- open `examples/Main.lean`,
+- run `ImpLab Toy DAP (auto-export ProgramInfo)` from `.vscode/launch.json`.
 
 ## VS Code launch flow
 
@@ -49,16 +77,37 @@ Minimal launch config:
 ## Launch contract
 
 - `programInfo` is required at launch.
+- Launch fails if neither inline `programInfo` nor valid `.dap/programInfo.generated.json` is available.
 - `source` is optional and affects source display in stack frames.
 - `toydapPath` and `toydapArgs` are optional adapter controls.
 
-Export example:
+Export examples:
 
 ```bash
 lake exe dap-export --decl ImpLab.Lang.Examples.mainProgram --out .dap/programInfo.generated.json
+lake exe dap-export --decl MyProject.Debugger.lesson1Program --out .dap/programInfo.generated.json
 ```
 
 `--decl` must resolve to an `ImpLab.ProgramInfo` declaration.
+
+## Execution model
+
+The interpreter uses explicit call frames:
+- each frame has function name, local environment, and program counter,
+- `call` pushes a frame,
+- `return` pops and assigns into caller destination,
+- stepping (`step`) is the semantic foundation for runtime and debugger behavior.
+
+## Widget RPC methods
+
+Registered in `ImpLab.Debugger.Widget.Server`:
+- `ImpLab.Debugger.Widget.Server.widgetLaunch`
+- `ImpLab.Debugger.Widget.Server.widgetStepIn`
+- `ImpLab.Debugger.Widget.Server.widgetStepBack`
+- `ImpLab.Debugger.Widget.Server.widgetContinue`
+- `ImpLab.Debugger.Widget.Server.widgetDisconnect`
+
+`widgetLaunch` accepts `programInfo` plus optional `stopOnEntry` and `breakpoints`.
 
 ## Lifecycle and behavior checks
 
@@ -75,6 +124,5 @@ cd client && npm run compile
 ```
 
 Key tests:
-
 - `Test/Core.lean`: core behavior and debugger semantics.
 - `Test/Transport.lean`: stdio framing, request wiring, lifecycle and breakpoint sanity.
