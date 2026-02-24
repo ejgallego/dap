@@ -34,11 +34,12 @@ def mainProgram : ProgramInfo := dap%[
 
 #eval run mainProgram
 
-def sampleTraceProps : TraceWidgetProps :=
-  match traceWidgetProps mainProgram with
-  | .ok props => props
-  | .error _ => default
+def sampleTraceProps : TraceWidgetInitProps :=
+  { programInfo := mainProgram }
+
+def sampleTracePropsJson : Lean.Json :=
+  Lean.toJson sampleTraceProps
 
 end Dap.Lang.Examples
 
-#widget Dap.traceExplorerWidget with Dap.Lang.Examples.sampleTraceProps
+#widget Dap.traceExplorerWidget with Dap.Lang.Examples.sampleTracePropsJson

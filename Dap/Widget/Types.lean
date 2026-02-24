@@ -16,18 +16,18 @@ structure ProgramLineView where
   stmtLine : Nat
   sourceLine : Nat
   text : String
-  deriving Repr, Inhabited, BEq, Server.RpcEncodable
+  deriving Repr, Inhabited, BEq, Server.RpcEncodable, FromJson, ToJson
 
 structure TraceCallFrameView where
   functionName : String
   stmtLine : Nat
   sourceLine : Nat
-  deriving Repr, Inhabited, BEq, Server.RpcEncodable
+  deriving Repr, Inhabited, BEq, Server.RpcEncodable, FromJson, ToJson
 
 structure BindingView where
   name : String
   value : Int
-  deriving Repr, Inhabited, BEq, Server.RpcEncodable
+  deriving Repr, Inhabited, BEq, Server.RpcEncodable, FromJson, ToJson
 
 structure StateView where
   functionName : String
@@ -37,12 +37,21 @@ structure StateView where
   callDepth : Nat
   callStack : Array TraceCallFrameView
   bindings : Array BindingView
-  deriving Repr, Inhabited, BEq, Server.RpcEncodable
+  deriving Repr, Inhabited, BEq, Server.RpcEncodable, FromJson, ToJson
 
-structure TraceWidgetProps where
+structure TraceWidgetInitProps where
+  programInfo : ProgramInfo
+  stopOnEntry : Bool := true
+  breakpoints : Array Nat := #[]
+  deriving Repr, Inhabited, BEq, Server.RpcEncodable, FromJson, ToJson
+
+structure TraceWidgetSessionView where
+  sessionId : Nat
   program : Array ProgramLineView
-  states : Array StateView
-  deriving Repr, Inhabited, BEq, Server.RpcEncodable
+  state : StateView
+  stopReason : String
+  terminated : Bool
+  deriving Repr, Inhabited, BEq, Server.RpcEncodable, FromJson, ToJson
 
 def ProgramLineView.ofLocatedStmt (located : LocatedStmt) : ProgramLineView :=
   { functionName := located.func
@@ -52,9 +61,6 @@ def ProgramLineView.ofLocatedStmt (located : LocatedStmt) : ProgramLineView :=
 
 def BindingView.ofPair (entry : Var × Value) : BindingView :=
   { name := entry.1, value := entry.2 }
-
-private def singletonSession (program : Program) (ctx : Context) : DebugSession :=
-  { program, history := #[ctx], cursor := 0 }
 
 def TraceCallFrameView.ofFrame
     (programInfo : ProgramInfo)
@@ -66,8 +72,7 @@ def TraceCallFrameView.ofFrame
     stmtLine
     sourceLine }
 
-def StateView.ofContext (programInfo : ProgramInfo) (ctx : Context) : StateView :=
-  let session := singletonSession programInfo.program ctx
+def StateView.ofSession (programInfo : ProgramInfo) (session : DebugSession) : StateView :=
   let stmtLine := session.currentLine
   let sourceLine := programInfo.locationToSourceLine { func := session.currentFuncName, stmtLine }
   let callStack := (session.callFrames.reverse.map (TraceCallFrameView.ofFrame programInfo session))
@@ -79,12 +84,17 @@ def StateView.ofContext (programInfo : ProgramInfo) (ctx : Context) : StateView 
     callStack := callStack
     bindings := session.bindings.map BindingView.ofPair }
 
-def TraceWidgetProps.ofContexts (programInfo : ProgramInfo) (states : Array Context) : TraceWidgetProps :=
-  { program := programInfo.located.map ProgramLineView.ofLocatedStmt
-    states := states.map (StateView.ofContext programInfo) }
+def ProgramLineView.ofProgramInfo (programInfo : ProgramInfo) : Array ProgramLineView :=
+  programInfo.located.map ProgramLineView.ofLocatedStmt
 
-def traceWidgetProps (programInfo : ProgramInfo) : Except String TraceWidgetProps := do
-  let (programInfo, states) ← Dap.buildTimeline programInfo
-  pure (TraceWidgetProps.ofContexts programInfo states)
+def TraceWidgetSessionView.ofSessionData
+    (sessionId : Nat)
+    (data : SessionData)
+    (stopReason : String := "entry") : TraceWidgetSessionView :=
+  { sessionId
+    program := ProgramLineView.ofProgramInfo data.programInfo
+    state := StateView.ofSession data.programInfo data.session
+    stopReason
+    terminated := data.status = .terminated || data.session.atEnd }
 
 end Dap

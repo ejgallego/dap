@@ -8,7 +8,7 @@ Do not add compatibility layers/shims during reorganizations; prefer a direct cl
 Primary surfaces:
 - Lean language runtime (`Dap/Lang/*.lean`)
 - Shared pure debugger API/core (`Dap/Debugger/Core.lean`)
-- Lean RPC debug service (`Dap/DAP/Server.lean`)
+- Lean RPC debug service (`Dap/Widget/Server.lean`)
 - Standalone DAP adapter (`Dap/DAP/Stdio.lean`, `ToyDap.lean`)
 - VS Code client extension (`client/`)
 - Widget demo (`Dap/Widget/Types.lean`, `Dap/Widget/Server.lean`)
@@ -28,7 +28,7 @@ Run these after meaningful changes touching Lean or VS Code codepaths.
 - Treat `ProgramInfo` as the canonical program representation across debugger flows.
 - `Program` is function-only (`functions : Array FuncDef`) with required `main` entrypoint.
 - Treat transports as adapters only:
-  - Lean RPC adapter logic in `Dap/DAP/Server.lean`
+  - Lean RPC adapter logic in `Dap/Widget/Server.lean`
   - StdIO DAP adapter logic in `Dap/DAP/Stdio.lean`
 - Implement new debugger behavior in `Dap/Debugger/Core.lean` first, then wire transports.
 - Avoid duplicating protocol/state logic across adapters.
@@ -37,6 +37,7 @@ Run these after meaningful changes touching Lean or VS Code codepaths.
 ## Coding conventions
 - Prefer simplicity and readability over performance-oriented complexity.
 - Prefer small, total helpers over large request handlers.
+- In project code, prefer `initialize` over `builtin_initialize`; reserve `builtin_initialize` for Lean core internals.
 - Preserve stable JSON shapes for DAP-facing payloads.
 - Keep sample/demo declarations in `examples/Main.lean` as canonical fixtures.
 - When adding new launch modes, update both docs and tests.
@@ -51,7 +52,7 @@ Run these after meaningful changes touching Lean or VS Code codepaths.
 - For DAP protocol sanity tests, cover lifecycle ordering and at least one breakpoint hit path.
 
 ## Review checklist
-- Any behavior duplicated between `Dap/DAP/Server.lean` and `Dap/DAP/Stdio.lean` that belongs in `Dap/Debugger/Core.lean`?
+- Any behavior duplicated between `Dap/Widget/Server.lean` and `Dap/DAP/Stdio.lean` that belongs in `Dap/Debugger/Core.lean`?
 - Any hardcoded declaration/entrypoint list that should be generalized?
 - Any duplicate decode/source-mapping logic that can drift from syntax/data definitions?
 - Are breakpoints/stack lines correctly mapped for all frames/functions via `ProgramInfo`?

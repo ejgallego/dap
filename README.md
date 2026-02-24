@@ -15,12 +15,12 @@ Lean 4 toy project for:
 - `Dap/Lang/Eval.lean`: environment, call-stack semantics, small-step transition, and full runner.
 - `Dap/Lang/History.lean`: shared cursor/history navigation helpers.
 - `Dap/Lang/Trace.lean`: execution trace and navigation API (`Explorer`).
-- `examples/Main.lean`: sample program and precomputed widget props.
+- `examples/Main.lean`: sample program and widget launch props.
 - `Dap/Debugger/Session.lean`: pure debugger session model (breakpoints, continue, next, stepIn, stepOut, stepBack).
 - `Dap/Debugger/Core.lean`: session store + DAP-shaped pure core operations.
 - `Dap/Widget/Server.lean`: Lean server RPC endpoints implementing DAP-like operations.
 - `Dap/DAP/Stdio.lean`: standalone DAP adapter implementation (native DAP protocol over stdio).
-- `Dap/Widget/Types.lean`: pure widget data model + trace-to-widget projection helpers.
+- `Dap/Widget/Types.lean`: widget launch/session view models and session-to-widget projection helpers.
 - `Dap/Widget/UI.lean`: `traceExplorerWidget` module UI.
 - `Dap/DAP/Export.lean`: `dap-export` declaration loader/export logic.
 - `Test/Core.lean`: core/runtime/debugger tests.
@@ -85,26 +85,17 @@ The interpreter uses explicit call frames:
 - `return` pops and assigns into caller destination,
 - stepping (`step`) is the semantic foundation for runtime and debugger behavior.
 
-## Lean RPC debug methods
+## Lean RPC widget methods
 
-Registered in `Dap.Server`:
+Registered in `Dap.Widget.Server`:
 
-- `Dap.Server.dapInitialize`
-- `Dap.Server.dapLaunch`
-- `Dap.Server.dapSetBreakpoints`
-- `Dap.Server.dapThreads`
-- `Dap.Server.dapStackTrace`
-- `Dap.Server.dapScopes`
-- `Dap.Server.dapVariables`
-- `Dap.Server.dapNext`
-- `Dap.Server.dapStepIn`
-- `Dap.Server.dapStepOut`
-- `Dap.Server.dapStepBack`
-- `Dap.Server.dapContinue`
-- `Dap.Server.dapPause`
-- `Dap.Server.dapDisconnect`
+- `Dap.Widget.Server.widgetLaunch`
+- `Dap.Widget.Server.widgetStepIn`
+- `Dap.Widget.Server.widgetStepBack`
+- `Dap.Widget.Server.widgetContinue`
+- `Dap.Widget.Server.widgetDisconnect`
 
-`dapLaunch` accepts only `programInfo`.
+`widgetLaunch` accepts `programInfo` plus optional `stopOnEntry` and `breakpoints`.
 
 ## Widget usage
 
@@ -113,10 +104,10 @@ In a Lean file:
 ```lean
 import examples.Main
 
-#widget Dap.traceExplorerWidget with Dap.Lang.Examples.sampleTraceProps
+#widget Dap.traceExplorerWidget with Dap.Lang.Examples.sampleTracePropsJson
 ```
 
-The widget shows grouped function code, current function/pc/source location, call stack, and locals over time-travelled states.
+The widget launches a live debugger session and shows grouped function code, current function/pc/source location, call stack, and locals while stepping.
 
 ## VS Code side-load client
 

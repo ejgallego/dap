@@ -184,15 +184,59 @@ def testWidgetProps : IO Unit := do
       Stmt.letBin "z" .div "y" "x"
     ]
   let info := mkProgramInfo program
-  match traceWidgetProps info with
-  | .error err =>
-    throw <| IO.userError s!"testWidgetProps failed: {err}"
-  | .ok props =>
-    assertEq "widget program length" props.program.size program.totalStmtCount
-    assertEq "widget states length" props.states.size (program.size + 1)
-    let firstState := (props.states[0]?).getD default
-    assertEq "widget first call stack depth" firstState.callStack.size firstState.callDepth
-    assertEq "widget last pc" ((props.states[props.states.size - 1]?.map (·.pc)).getD 0) program.size
+  let (store, launch) ← expectCore "widget launch" <| Dap.launchFromProgramInfo {} info true #[]
+  let data ← expectCore "widget session inspect" <| Dap.inspectSession store launch.sessionId
+  let props := TraceWidgetSessionView.ofSessionData launch.sessionId data launch.stopReason
+  assertEq "widget session id" props.sessionId launch.sessionId
+  assertEq "widget program length" props.program.size program.totalStmtCount
+  assertEq "widget call stack depth" props.state.callStack.size props.state.callDepth
+  assertEq "widget initial function" props.state.functionName Program.mainName
+
+def testWidgetSessionProjectionAfterStep : IO Unit := do
+  let info : ProgramInfo := dap%[
+    def main() := {
+      let x := 2,
+      let y := 8,
+      let z := div y x
+    }
+  ]
+  let (store1, launch) ← expectCore "widget step launch" <| Dap.launchFromProgramInfo {} info true #[]
+  let (store2, step) ← expectCore "widget step forward" <| Dap.stepIn store1 launch.sessionId
+  let data ← expectCore "widget step inspect" <| Dap.inspectSession store2 launch.sessionId
+  let props := TraceWidgetSessionView.ofSessionData launch.sessionId data step.stopReason
+  assertEq "widget step reason propagated" props.stopReason step.stopReason
+  assertEq "widget step state pc" props.state.pc 1
+  assertEq "widget step state stmt line" props.state.stmtLine 2
+
+def testWidgetInitProps : IO Unit := do
+  let info : ProgramInfo := dap%[
+    def main() := {
+      let x := 1
+    }
+  ]
+  let props : TraceWidgetInitProps := { programInfo := info, stopOnEntry := false, breakpoints := #[1] }
+  let decoded ←
+    match (fromJson? (toJson props) : Except String TraceWidgetInitProps) with
+    | .ok decoded => pure decoded
+    | .error err =>
+      throw <| IO.userError s!"testWidgetInitProps decode failed: {err}"
+  assertEq "widget init stopOnEntry" decoded.stopOnEntry false
+  assertEq "widget init breakpoints" decoded.breakpoints #[1]
+
+def testWidgetSessionViewJsonRoundtrip : IO Unit := do
+  let view : TraceWidgetSessionView :=
+    { sessionId := 7
+      program := #[]
+      state := default
+      stopReason := "entry"
+      terminated := false }
+  let decoded ←
+    match (fromJson? (toJson view) : Except String TraceWidgetSessionView) with
+    | .ok decoded => pure decoded
+    | .error err =>
+      throw <| IO.userError s!"testWidgetSessionViewJsonRoundtrip decode failed: {err}"
+  assertEq "widget session view roundtrip id" decoded.sessionId view.sessionId
+  assertEq "widget session view roundtrip stopReason" decoded.stopReason view.stopReason
 
 def testDebugSessionContinueAndBreakpoints : IO Unit := do
   let program := mkProgram
@@ -524,40 +568,6 @@ def testResolveCandidateDeclNames : IO Unit := do
   let qualified := Dap.candidateDeclNames `Main.mainProgram (moduleName? := some `Main)
   assertEq "qualified names stay unchanged" qualified #[`Main.mainProgram]
 
-def testRpcLaunchParamsProgramInfoOnly : IO Unit := do
-  let info : ProgramInfo := dap%[
-    def main() := {
-      let x := 1
-    }
-  ]
-  let params : Dap.Server.LaunchParams :=
-    { programInfo := info
-      stopOnEntry := false
-      breakpoints := #[1] }
-  let decoded ←
-    match (fromJson? (toJson params) : Except String Dap.Server.LaunchParams) with
-    | .ok params => pure params
-    | .error err =>
-      throw <| IO.userError s!"testRpcLaunchParamsProgramInfoOnly decode failed: {err}"
-  assertEq "launch params preserve breakpoints" decoded.breakpoints #[1]
-  assertEq "launch params preserve stopOnEntry" decoded.stopOnEntry false
-
-def testCoreBuildTimeline : IO Unit := do
-  let info : ProgramInfo := dap%[
-    def square(x) := {
-      let out := mul x x,
-      return out
-    },
-    def main() := {
-      let v := 3,
-      let out := call square(v)
-    }
-  ]
-  let (_validatedInfo, states) ← expectCore "build timeline" <| Dap.buildTimeline info
-  assertEq "build timeline size" states.size 5
-  assertSomeEq "build timeline first pc" (states[0]?.map (·.pc)) 0
-  assertSomeEq "build timeline final pc" (states[states.size - 1]?.map (·.pc)) 2
-
 def runCoreTests : IO Unit := do
   testRunProgram
   testUnboundVariable
@@ -569,6 +579,9 @@ def runCoreTests : IO Unit := do
   testTraceShape
   testExplorerNavigation
   testWidgetProps
+  testWidgetSessionProjectionAfterStep
+  testWidgetInitProps
+  testWidgetSessionViewJsonRoundtrip
   testDebugSessionContinueAndBreakpoints
   testDebugSessionStepBack
   testDebugCoreStepInOut
@@ -583,7 +596,5 @@ def runCoreTests : IO Unit := do
   testDebugCoreTerminatedGuards
   testDebugCoreRejectsInvalidProgramInfo
   testResolveCandidateDeclNames
-  testRpcLaunchParamsProgramInfoOnly
-  testCoreBuildTimeline
 
 end Dap.Tests

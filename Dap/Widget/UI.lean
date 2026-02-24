@@ -15,6 +15,7 @@ namespace Dap
 def traceExplorerWidget : Widget.Module where
   javascript := "
 import * as React from 'react';
+import { useRpcSession } from '@leanprover/infoview';
 const e = React.createElement;
 
 function clamp(v, lo, hi) {
@@ -67,16 +68,70 @@ function renderCodeTokens(text, keyPrefix) {
 }
 
 export default function(props) {
-  const states = props.states;
-  const program = props.program;
-  const programGroups = groupProgramByFunction(program);
-  const maxIndex = Math.max(states.length - 1, 0);
-  const [cursor, setCursor] = React.useState(0);
-  const idx = clamp(cursor, 0, maxIndex);
-  const state = states[idx];
+  const rs = useRpcSession();
+  const [session, setSession] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const sessionIdRef = React.useRef(null);
+  const launchParams = {
+    programInfo: props.programInfo,
+    stopOnEntry: props.stopOnEntry ?? true,
+    breakpoints: props.breakpoints ?? []
+  };
+  const launchSignature = JSON.stringify(launchParams);
 
-  const canBack = idx > 0;
-  const canForward = idx < maxIndex;
+  React.useEffect(() => {
+    let cancelled = false;
+    async function launch() {
+      setBusy(true);
+      setError(null);
+      try {
+        const launched = await rs.call('Dap.Widget.Server.widgetLaunch', launchParams);
+        if (!cancelled) {
+          sessionIdRef.current = launched.sessionId;
+          setSession(launched);
+        }
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    }
+    launch();
+    return () => {
+      cancelled = true;
+      if (sessionIdRef.current !== null) {
+        rs.call('Dap.Widget.Server.widgetDisconnect', { sessionId: sessionIdRef.current }).catch(() => {});
+        sessionIdRef.current = null;
+      }
+    };
+  }, [rs, launchSignature]);
+
+  async function control(method) {
+    if (!session) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await rs.call(method, { sessionId: session.sessionId });
+      sessionIdRef.current = updated.sessionId;
+      setSession(updated);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error) {
+    return e('pre', { style: { color: '#b42318', margin: 0 } }, String(error));
+  }
+  if (!session) {
+    return e('div', {}, busy ? 'Launching debugger session...' : 'No session');
+  }
+
+  const state = session.state;
+  const program = session.program;
+  const programGroups = groupProgramByFunction(program);
 
   const programSections = programGroups.map((group, groupIdx) =>
     e('div', { key: 'group-' + String(groupIdx), style: { marginBottom: '12px' } }, [
@@ -177,14 +232,16 @@ export default function(props) {
         key: 'controls',
         style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }
       }, [
-        e('button', { key: 'back', onClick: () => setCursor(idx - 1), disabled: !canBack }, 'Back'),
-        e('button', { key: 'forward', onClick: () => setCursor(idx + 1), disabled: !canForward }, 'Forward'),
-        e('span', { key: 'step' }, 'State ' + String(idx) + '/' + String(maxIndex)),
+        e('button', { key: 'back', onClick: () => control('Dap.Widget.Server.widgetStepBack'), disabled: busy }, 'StepBack'),
+        e('button', { key: 'forward', onClick: () => control('Dap.Widget.Server.widgetStepIn'), disabled: busy }, 'StepIn'),
+        e('button', { key: 'cont', onClick: () => control('Dap.Widget.Server.widgetContinue'), disabled: busy }, 'Continue'),
+        e('span', { key: 'status' }, 'status = ' + String(session.stopReason)),
         e('span', { key: 'fn', style: { marginLeft: '8px' } }, 'fn = ' + String(state.functionName)),
         e('span', { key: 'pc', style: { marginLeft: '8px' } }, 'pc = ' + String(state.pc)),
         e('span', { key: 'stmt', style: { marginLeft: '8px' } }, 'stmt = ' + String(state.stmtLine)),
         e('span', { key: 'src', style: { marginLeft: '8px' } }, 'src = ' + String(state.sourceLine)),
-        e('span', { key: 'depth', style: { marginLeft: '8px' } }, 'depth = ' + String(state.callDepth))
+        e('span', { key: 'depth', style: { marginLeft: '8px' } }, 'depth = ' + String(state.callDepth)),
+        e('span', { key: 'term', style: { marginLeft: '8px' } }, 'terminated = ' + String(session.terminated))
       ]),
       e('div', {
         key: 'body',

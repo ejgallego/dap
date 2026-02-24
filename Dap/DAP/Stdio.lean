@@ -108,19 +108,9 @@ private def parseBreakpointsArray (json : Json) : Array Nat :=
         acc
 
 private def parseBreakpointLines (args : Json) : Array Nat :=
-  let fromBreakpoints :=
-    match (args.getObjVal? "breakpoints").toOption with
-    | some breakpointsJson => parseBreakpointsArray breakpointsJson
-    | none => #[]
-  if !fromBreakpoints.isEmpty then
-    fromBreakpoints
-  else
-    match (args.getObjValAs? (Array Nat) "lines").toOption with
-    | some lines =>
-      lines.foldl (init := #[]) fun acc line =>
-        if line > 0 then acc.push line else acc
-    | none =>
-      #[]
+  match (args.getObjVal? "breakpoints").toOption with
+  | some breakpointsJson => parseBreakpointsArray breakpointsJson
+  | none => #[]
 
 private def requireProgramInfo (args : Json) : IO ProgramInfo := do
   let programInfoJson ←
